@@ -1025,12 +1025,6 @@ body.night .btn *{ color: inherit !important; }
   // ✅ (AJOUT) mémorisation du scope catalogue
   const SCOPE_KEY = "catalogScope";
 
-  // ✅ (AJOUT) manter a leitura após refresh
-  const READER_OPEN_KEY = "readerOpen";
-  const LAST_BOOK_ID_KEY = "lastBookId";
-  const HASH_PREFIX = "#read=";
-
-
   // =======================
   // DOM
   // =======================
@@ -1179,11 +1173,19 @@ function syncSpreadButton(){
     }[m]));
   }
 
-  function normalize(str){
-    return String(str || "")
-      .toLowerCase()
-      .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  \1
+
+  async function fetchArrayBufferFirst(paths){
+    for (const p of paths){
+      try{
+        const resp = await fetch(p);
+        if (!resp.ok) continue;
+        return { path: p, arrayBuffer: await resp.arrayBuffer() };
+      } catch(e){ /* try next */ }
+    }
+    throw new Error("EPUB não encontrado (paths testados: " + paths.join(", ") + ")");
   }
+
 
   function resetPasswordVisibility(){
     try{
@@ -1211,34 +1213,7 @@ function syncSpreadButton(){
   function clearError() {
     elError.style.display = "none";
     elError.textContent = "";
-  
-  function setReaderState(open, bookId){
-    try{
-      if (open) {
-        sessionStorage.setItem(READER_OPEN_KEY, "1");
-        if (bookId) sessionStorage.setItem(LAST_BOOK_ID_KEY, String(bookId));
-      } else {
-        sessionStorage.removeItem(READER_OPEN_KEY);
-        sessionStorage.removeItem(LAST_BOOK_ID_KEY);
-      }
-    } catch(e){}
   }
-
-  function setReaderHash(bookId){
-    try{
-      if (!bookId) return;
-      const h = HASH_PREFIX + encodeURIComponent(String(bookId));
-      if (location.hash !== h) history.replaceState(null, "", h);
-    } catch(e){}
-  }
-
-  function clearReaderHash(){
-    try{
-      if ((location.hash || "").startsWith(HASH_PREFIX)) history.replaceState(null, "", location.pathname + location.search);
-    } catch(e){}
-  }
-
-}
 
   function showReader() {
     elCatalogo.style.display = "none";
@@ -2186,13 +2161,18 @@ window.addEventListener("resize", () => {
     if (!b.cover) {
       return `<div class="book-cover-fallback" aria-hidden="true">sem<br>capa</div>`;
     }
+    const cover = String(b.cover || "");
+    let alt = "";
+    if (cover.startsWith("assets/")) alt = "docs/" + cover;
+    else if (cover.startsWith("docs/")) alt = cover.replace(/^docs\//, "");
     return `
       <img
         class="book-cover"
-        src="${escapeHtml(b.cover)}"
+        src="${escapeHtml(cover)}"
+        ${alt ? `data-alt-src="${escapeHtml(alt)}"` : ""}
         alt="Capa – ${escapeHtml(b.title)}"
         loading="lazy"
-        onerror="this.outerHTML='<div class=&quot;book-cover-fallback&quot; aria-hidden=&quot;true&quot;>sem<br>capa</div>'"
+        onerror="(function(img){try{var a=img.getAttribute('data-alt-src');var t=img.getAttribute('data-tried-alt');if(a && !t){img.setAttribute('data-tried-alt','1');img.src=a;return;} }catch(e){} img.outerHTML='<div class=&quot;book-cover-fallback&quot; aria-hidden=&quot;true&quot;>sem<br>capa</div>';})(this)"
       >
     `;
   }
@@ -2305,10 +2285,6 @@ window.addEventListener("resize", () => {
   // ===== OPEN BOOK =====
   async function openBook(item) {
     clearError();
-    // ✅ manter o leitor aberto no refresh
-    setReaderState(true, item && item.id ? item.id : null);
-    setReaderHash(item && item.id ? item.id : null);
-
 
     currentItem = item;
     noteStack = [];
@@ -2361,11 +2337,14 @@ window.addEventListener("resize", () => {
       hardCssHookInstalled = false;
       noteHookInstalled = false;
 
-      const path = "epubs/" + item.file;
-
-      const resp = await fetch(path);
-      if (!resp.ok) throw new Error("HTTP " + resp.status);
-      const arrayBuffer = await resp.arrayBuffer();
+      const candidates = [
+        "epubs/" + item.file,
+        "docs/epubs/" + item.file,
+        "docs/" + item.file,
+        item.file
+      ];
+      const got = await fetchArrayBufferFirst(candidates);
+      const arrayBuffer = got.arrayBuffer;
 
       book = window.ePub(arrayBuffer);
 
@@ -2469,9 +2448,6 @@ window.addEventListener("resize", () => {
 
   btnBack.addEventListener("click", async () => {
     clearError();
-    // ✅ voltar ao catálogo: limpar estado de leitura
-    setReaderState(false, null);
-    clearReaderHash();
     stopReadingTimer();
     closeDrawer();
     if (isFullscreen()) await exitFullscreen();
@@ -2525,30 +2501,6 @@ btnSpread && btnSpread.addEventListener("click", async () => {
 
   updatePrivateUI();
   renderCatalog();
-
-  // ✅ (AJOUT) restaurar leitor após refresh (hash tem prioridade)
-  (async () => {
-    try{
-      const hash = String(location.hash || "");
-      let wantedId = "";
-      if (hash.startsWith(HASH_PREFIX)) {
-        wantedId = decodeURIComponent(hash.slice(HASH_PREFIX.length)).trim();
-      } else {
-        const shouldRestore = sessionStorage.getItem(READER_OPEN_KEY) === "1";
-        if (shouldRestore) wantedId = String(sessionStorage.getItem(LAST_BOOK_ID_KEY) || "").trim();
-      }
-      if (!wantedId) return;
-
-      const item = getAllBooks().find(x => x.id === wantedId);
-      if (!item) {
-        // livro não acessível (ex: área restrita bloqueada)
-        setReaderState(false, null);
-        clearReaderHash();
-        return;
-      }
-      await openBook(item);
-    } catch(e){}
-  })();
 
 })();
 </script>
