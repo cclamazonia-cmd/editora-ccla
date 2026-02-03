@@ -650,6 +650,7 @@ body.zen.ui-visible .progress-wrap{
     transform .2s ease,
     filter .2s ease;
 }
+
 /* Drawer */
 .drawer-backdrop{
   position:fixed;
@@ -872,7 +873,8 @@ body.night .btn *{ color: inherit !important; }
       <button class="btn" id="clearSearchBtn" type="button" title="Limpar pesquisa" aria-label="Limpar pesquisa">Limpar</button>
     </div>
 
-    <h3 style="margin:14px 0 10px;font-size:16px;">Catálogo público</h3>
+    <!-- ✅ IDs pour pouvoir masquer/afficher proprement selon le scope -->
+    <h3 id="publicHeading" style="margin:14px 0 10px;font-size:16px;">Catálogo público</h3>
     <div id="booksPublic"></div>
 
     <div class="restricted-box" aria-label="Acesso restrito">
@@ -890,7 +892,7 @@ body.night .btn *{ color: inherit !important; }
         </label>
 
         <button class="btn btn-primary" id="unlockBtn" type="button">Desbloquear</button>
-                <label title="Manter desbloqueado neste dispositivo">
+        <label title="Manter desbloqueado neste dispositivo">
           <input id="rememberChk" type="checkbox">
           lembrar
         </label>
@@ -899,7 +901,7 @@ body.night .btn *{ color: inherit !important; }
       <div class="restricted-status" id="restrictedStatus">🔒 Bloqueado</div>
 
       <div id="privateArea" style="display:none; margin-top:14px;">
-        <h3 style="margin:0 0 10px;font-size:16px;">Catálogo restrito</h3>
+        <h3 id="privateHeading" style="margin:0 0 10px;font-size:16px;">Catálogo restrito</h3>
         <div id="booksPrivate"></div>
       </div>
     </div>
@@ -1021,15 +1023,14 @@ body.night .btn *{ color: inherit !important; }
   const ACCESS_KEY = "privateAccess";
   const ACCESS_HASH_KEY = "privateAccessHash";
 
-  // ✅ (AJOUT) mémorisation du scope catalogue
+  // mémorisation du scope catalogue
   const SCOPE_KEY = "catalogScope";
 
-  
-
-  // ✅ (AJOUT) mémorisation de l\'état UI (rester dans le lecteur après refresh)
+  // mémorisation de l'état UI (rester dans le lecteur après refresh)
   const UI_MODE_KEY = "uiMode";        // "catalog" | "reader"
   const LAST_BOOK_KEY = "lastBookId";  // id du dernier livre ouvert
-// =======================
+
+  // =======================
   // DOM
   // =======================
   const elCatalogo = document.getElementById("catalogo");
@@ -1078,6 +1079,8 @@ body.night .btn *{ color: inherit !important; }
 
   const elBooksPublic = document.getElementById("booksPublic");
   const elBooksPrivate = document.getElementById("booksPrivate");
+  const publicHeading = document.getElementById("publicHeading");
+  const privateHeading = document.getElementById("privateHeading");
 
   const pwInput = document.getElementById("pwInput");
   const unlockBtn = document.getElementById("unlockBtn");
@@ -1119,32 +1122,29 @@ body.night .btn *{ color: inherit !important; }
 
   const FLOW_MODE = "paginated";
 
+  // Desktop-only double-page (spread) toggle
+  const SPREAD_KEY = "spreadDesktop";
+  let spreadOnDesktop = (localStorage.getItem(SPREAD_KEY) || "1") === "1";
+  const DESKTOP_SPREAD_MIN_WIDTH = 980; // px
 
-// Desktop-only double-page (spread) toggle
-const SPREAD_KEY = "spreadDesktop";
-let spreadOnDesktop = (localStorage.getItem(SPREAD_KEY) || "1") === "1";
-const DESKTOP_SPREAD_MIN_WIDTH = 980; // px
+  function isDesktopForSpread(){
+    return window.innerWidth >= DESKTOP_SPREAD_MIN_WIDTH
+      && !window.matchMedia("(pointer: coarse)").matches;
+  }
 
-function isDesktopForSpread(){
-  return window.innerWidth >= DESKTOP_SPREAD_MIN_WIDTH
-    && !window.matchMedia("(pointer: coarse)").matches;
-}
+  function desiredSpread(){
+    if (!spreadOnDesktop) return "none";
+    return isDesktopForSpread() ? "auto" : "none";
+  }
 
-function desiredSpread(){
-  // epub.js spread modes: "none" = single page, "auto" = decide, "always" = force
-  if (!spreadOnDesktop) return "none";
-  return isDesktopForSpread() ? "auto" : "none";
-}
-
-function syncSpreadButton(){
-  if (!btnSpread) return;
-  const on = spreadOnDesktop && isDesktopForSpread();
-  btnSpread.textContent = on ? "2p✓" : "2p";
-  btnSpread.setAttribute("aria-pressed", spreadOnDesktop ? "true" : "false");
-  btnSpread.setAttribute("aria-label", spreadOnDesktop ? "Duas páginas no desktop: ativado" : "Duas páginas no desktop: desativado");
-  btnSpread.title = spreadOnDesktop ? "Duas páginas (desktop): ligado" : "Duas páginas (desktop): desligado";
-}
-
+  function syncSpreadButton(){
+    if (!btnSpread) return;
+    const on = spreadOnDesktop && isDesktopForSpread();
+    btnSpread.textContent = on ? "2p✓" : "2p";
+    btnSpread.setAttribute("aria-pressed", spreadOnDesktop ? "true" : "false");
+    btnSpread.setAttribute("aria-label", spreadOnDesktop ? "Duas páginas no desktop: ativado" : "Duas páginas no desktop: desativado");
+    btnSpread.title = spreadOnDesktop ? "Duas páginas (desktop): ligado" : "Duas páginas (desktop): desligado";
+  }
 
   let langHookInstalled = false;
   let hardCssHookInstalled = false;
@@ -1176,18 +1176,15 @@ function syncSpreadButton(){
     }[m]));
   }
 
-
-  // Normalize strings for search/sort (case-insensitive, accent-insensitive)
   function normalize(s){
     return String(s || "")
       .toLowerCase()
       .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")  // strip diacritics
+      .replace(/[\u0300-\u036f]/g, "")
       .replace(/\s+/g, " ")
       .trim();
   }
 
-  // Normalize password input (avoids NFC/NFD mismatch and exotic hyphens)
   function normalizePassword(s){
     return String(s || "")
       .trim()
@@ -1195,8 +1192,6 @@ function syncSpreadButton(){
       .normalize("NFC");
   }
 
-  // SHA-256 fallback for non-secure contexts (e.g. file://) where crypto.subtle is unavailable
-  // Returns hex string.
   function sha256HexFallback(message){
     function rotr(n,x){ return (x >>> n) | (x << (32-n)); }
     function ch(x,y,z){ return (x & y) ^ (~x & z); }
@@ -1269,11 +1264,10 @@ function syncSpreadButton(){
         const resp = await fetch(p);
         if (!resp.ok) continue;
         return { path: p, arrayBuffer: await resp.arrayBuffer() };
-      } catch(e){ /* try next */ }
+      } catch(e){}
     }
     throw new Error("EPUB não encontrado (paths testados: " + paths.join(", ") + ")");
   }
-
 
   function resetPasswordVisibility(){
     try{
@@ -1471,8 +1465,6 @@ html, body {
   background: ${bg} !important;
   color: ${fg} !important;
   font-family: ${fontFamily} !important;
-    try { localStorage.setItem(UI_MODE_KEY, "reader"); } catch(e) {}
-    try { localStorage.setItem(UI_MODE_KEY, "catalog"); } catch(e) {}
 }
 
 * {
@@ -1506,24 +1498,6 @@ img, svg {
   display: block !important;
   margin-left: auto !important;
   margin-right: auto !important;
-}
-
-/* If the page is basically a single image (typical cover), center it on the page */
-body:has(> img:only-child),
-body:has(> figure:only-child){
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  padding: 0 !important;
-}
-body:has(> img:only-child) > img{
-  max-height: 96vh !important;
-  width: auto !important;
-}
-body:has(> figure:only-child) figure{ margin: 0 !important; }
-body:has(> figure:only-child) img{
-  max-height: 96vh !important;
-  width: auto !important;
 }
 
 table, thead, tbody, tr, td, th { background: transparent !important; }
@@ -1589,14 +1563,13 @@ table, thead, tbody, tr, td, th { background: transparent !important; }
             const doc = contents.document;
             if (!doc || !doc.body) return;
 
-            // Click-to-turn pages inside the book (does not affect links / selection)
             doc.addEventListener("click", (ev) => {
               try{
                 if (!rendition) return;
                 if (ev.defaultPrevented) return;
 
                 const a = ev.target && ev.target.closest ? ev.target.closest("a") : null;
-                if (a) return; // links handled elsewhere
+                if (a) return;
 
                 const sel = doc.defaultView && doc.defaultView.getSelection ? doc.defaultView.getSelection() : null;
                 if (sel && String(sel.toString() || "").trim()) return;
@@ -1608,7 +1581,6 @@ table, thead, tbody, tr, td, th { background: transparent !important; }
               } catch(e){}
             }, {passive:true});
 
-            // Footnotes: remember where we are and allow return
             doc.addEventListener("click", (ev) => {
               try{
                 const a = ev.target && ev.target.closest ? ev.target.closest("a") : null;
@@ -1658,7 +1630,6 @@ table, thead, tbody, tr, td, th { background: transparent !important; }
         });
       } catch(e){}
     }
-
   }
 
   function applyThemeToRendition() {
@@ -1723,22 +1694,21 @@ table, thead, tbody, tr, td, th { background: transparent !important; }
     if (btnFs) btnFs.textContent = fs ? "⤫" : "⛶";
     if (fs) showFsExitTemporarily();
     else if (btnFsExit) btnFsExit.classList.remove("show");
-    // Spread: on fullscreen, force single page for comfort
     try { rendition && rendition.spread(fs ? "none" : desiredSpread()); } catch(e){}
     try { rendition && rendition.resize(); } catch(e){}
   });
 
+  // Resize
+  let _resizeT = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(_resizeT);
+    _resizeT = setTimeout(() => {
+      syncSpreadButton();
+      try { rendition && rendition.spread(desiredSpread()); } catch(e){}
+      try { rendition && rendition.resize(); } catch(e){}
+    }, 120);
+  });
 
-  // Resize: keep EPUB layout synced with the (ratio-based) viewer box + spread on desktop
-let _resizeT = null;
-window.addEventListener("resize", () => {
-  clearTimeout(_resizeT);
-  _resizeT = setTimeout(() => {
-    syncSpreadButton();
-    try { rendition && rendition.spread(desiredSpread()); } catch(e){}
-    try { rendition && rendition.resize(); } catch(e){}
-  }, 120);
-});
   ["mousemove","touchstart","click"].forEach(evt => {
     viewerShell && viewerShell.addEventListener(evt, () => {
       if (isFullscreen()) showFsExitTemporarily();
@@ -1752,10 +1722,8 @@ window.addEventListener("resize", () => {
     localStorage.setItem("zenOn", zenOn ? "1" : "0");
     btnZen.textContent = zenOn ? "🕶✓" : "🕶";
     btnZen.setAttribute("aria-label", zenOn ? "Desativar modo Zen" : "Ativar modo Zen");
-    if (zenOn) {
-      // show UI briefly so the transition feels gentle
-      showUI();
-    } else {
+    if (zenOn) showUI();
+    else {
       clearTimeout(uiHideTimer);
       document.body.classList.remove("ui-visible");
     }
@@ -2053,11 +2021,9 @@ window.addEventListener("resize", () => {
 
   function hasSelection(){
     try{
-      // Check selection in the top window
       const sel0 = window.getSelection && window.getSelection();
       if (sel0 && String(sel0.toString() || "").trim()) return true;
 
-      // Check selection inside the current EPUB iframe(s)
       if (rendition && typeof rendition.getContents === "function") {
         const list = rendition.getContents() || [];
         for (const c of list) {
@@ -2110,7 +2076,6 @@ window.addEventListener("resize", () => {
     const before = locSig(getSafeLocation());
     try { await rendition.prev(); } catch(e){}
 
-    // If we didn't move (often happens at the very start of a spine item), try previous chapter
     setTimeout(async () => {
       const after = locSig(getSafeLocation());
       if (after === before) {
@@ -2126,7 +2091,6 @@ window.addEventListener("resize", () => {
     const before = locSig(getSafeLocation());
     try { await rendition.next(); } catch(e){}
 
-    // If we didn't move (often happens at end of a spine item), try next chapter
     setTimeout(async () => {
       const after = locSig(getSafeLocation());
       if (after === before) {
@@ -2149,8 +2113,6 @@ window.addEventListener("resize", () => {
     const idx0 = loc0 && loc0.start ? loc0.start.index : null;
     if (idx0 == null) return;
 
-    // Walk forward until we enter the next spine item, then go back one page.
-    // Safety cap prevents infinite loops on malformed EPUBs.
     let lastSig = locSig(loc0);
     for (let i=0; i<220; i++){
       try { await rendition.next(); } catch(e){}
@@ -2163,7 +2125,6 @@ window.addEventListener("resize", () => {
         break;
       }
       if (sig === lastSig){
-        // Can't advance: already at the end
         break;
       }
       lastSig = sig;
@@ -2172,6 +2133,15 @@ window.addEventListener("resize", () => {
 
   tapLeft && tapLeft.addEventListener("click", safePrev);
   tapRight && tapRight.addEventListener("click", safeNext);
+
+  // ✅ Cover fix: force single-page ONLY on cover (spine index 0)
+  function adjustSpreadForCover(location){
+    if (!rendition) return;
+    if (!spreadOnDesktop || !isDesktopForSpread()) { try{ rendition.spread("none"); }catch(e){} return; }
+    const idx = location && location.start ? location.start.index : null;
+    const onCover = (idx === 0);
+    try { rendition.spread(onCover ? "none" : desiredSpread()); } catch(e){}
+  }
 
   // ===== PRIVATE ACCESS =====
   function getStore(remember){
@@ -2192,35 +2162,19 @@ window.addEventListener("resize", () => {
     if (PRIVATE_PASSWORD_HASH_HEX) store.setItem(ACCESS_HASH_KEY, PRIVATE_PASSWORD_HASH_HEX);
   }
 
-  function clearUnlocked(){
-    try {
-      localStorage.removeItem(ACCESS_KEY);
-      localStorage.removeItem(ACCESS_HASH_KEY);
-      sessionStorage.removeItem(ACCESS_KEY);
-      sessionStorage.removeItem(ACCESS_HASH_KEY);
-    } catch(e){}
-  }
-
   function updatePrivateUI(){
     const unlocked = isUnlocked();
     privateArea.style.display = unlocked ? "block" : "none";
     restrictedStatus.textContent = unlocked ? "🔓 Desbloqueado" : "🔒 Bloqueado";
 
-    // ✅ (AJOUT) Restaurer/forcer le scope après refresh
+    // ✅ scope: si verrouillé → on force public
     if (scopeSelect) {
       let savedScope = "public";
       try { savedScope = localStorage.getItem(SCOPE_KEY) || "public"; } catch(e){}
-
-      if (unlocked) {
-        // Si déverrouillé, on évite de "perdre" le privé au refresh
-        scopeSelect.value = (savedScope === "public") ? "all" : savedScope;
-      } else {
-        // Si verrouillé, on empêche l'affichage "private/all"
-        scopeSelect.value = (savedScope === "private" || savedScope === "all") ? "public" : savedScope;
-      }
+      if (!unlocked && (savedScope === "private" || savedScope === "all")) savedScope = "public";
+      scopeSelect.value = savedScope;
     }
 
-    if (!unlocked && scopeSelect && scopeSelect.value === "private") scopeSelect.value = "public";
     renderCatalog();
   }
 
@@ -2235,7 +2189,6 @@ window.addEventListener("resize", () => {
       const hash = await crypto.subtle.digest("SHA-256", data);
       return bytesToHex(new Uint8Array(hash));
     }
-    // file:// and other non-secure contexts
     return sha256HexFallback(text);
   }
 
@@ -2253,12 +2206,12 @@ window.addEventListener("resize", () => {
     try {
       const h = await sha256Hex(pw);
       if (h === PRIVATE_PASSWORD_HASH_HEX) {
-        setUnlocked(!!rememberChk.checked); // lembrar = persistant (localStorage)
+        setUnlocked(!!rememberChk.checked);
         pwInput.value = "";
 
-        // ✅ show everything immediately after unlock + mémorisation
-        if (scopeSelect) scopeSelect.value = "all";
-        try { localStorage.setItem(SCOPE_KEY, "all"); } catch(e){}
+        // ✅ après unlock: par défaut on bascule sur "private" (restrito)
+        if (scopeSelect) scopeSelect.value = "private";
+        try { localStorage.setItem(SCOPE_KEY, "private"); } catch(e){}
 
         updatePrivateUI();
       } else {
@@ -2357,36 +2310,50 @@ window.addEventListener("resize", () => {
 
   function renderCatalog(){
     const unlocked = isUnlocked();
-    const scope = (scopeSelect && scopeSelect.value) || "public";
+    let scope = (scopeSelect && scopeSelect.value) || "public";
+
+    // ✅ si pas unlocked, "private/all" interdit → public
+    if (!unlocked && (scope === "private" || scope === "all")) scope = "public";
 
     const publicList = filterAndSort(BOOKS_PUBLIC);
     const privateList = filterAndSort(BOOKS_PRIVATE);
 
-    // ✅ Public catalogue is ALWAYS visible, no matter what.
-    elBooksPublic.style.display = "block";
-    renderListInto(elBooksPublic, publicList);
-
+    // ✅ logique demandée:
+    // public = public seul
+    // private = privé seul (si unlocked)
+    // all = public + privé
+    const showPublic = (scope === "public" || scope === "all");
     const showPrivate = unlocked && (scope === "private" || scope === "all");
-    privateArea.style.display = unlocked ? "block" : "none";
-    if (unlocked) {
-      elBooksPrivate.style.display = showPrivate ? "block" : "none";
-      if (showPrivate) renderListInto(elBooksPrivate, privateList);
-    } else {
-      elBooksPrivate.innerHTML = "";
-    }
 
-    if (publicList.length === 0) {
+    if (publicHeading) publicHeading.style.display = showPublic ? "block" : "none";
+    elBooksPublic.style.display = showPublic ? "block" : "none";
+
+    if (showPublic) renderListInto(elBooksPublic, publicList);
+    else elBooksPublic.innerHTML = "";
+
+    privateArea.style.display = unlocked ? "block" : "none";
+    if (privateHeading) privateHeading.style.display = showPrivate ? "block" : "none";
+    elBooksPrivate.style.display = showPrivate ? "block" : "none";
+
+    if (showPrivate) renderListInto(elBooksPrivate, privateList);
+    else elBooksPrivate.innerHTML = "";
+
+    if (showPublic && publicList.length === 0) {
       elBooksPublic.innerHTML = `<div class="notice">Nenhum resultado no catálogo público.</div>`;
     }
     if (showPrivate && privateList.length === 0) {
       elBooksPrivate.innerHTML = `<div class="notice">Nenhum resultado no catálogo restrito.</div>`;
+    }
+
+    // ✅ si scope=private mais pas showPrivate (non unlock) : feedback simple
+    if (!unlocked && scope === "public") {
+      // rien
     }
   }
 
   searchInput && searchInput.addEventListener("input", renderCatalog);
   sortSelect && sortSelect.addEventListener("change", renderCatalog);
 
-  // ✅ (MODIF) mémoriser le scope à chaque changement
   scopeSelect && scopeSelect.addEventListener("change", () => {
     try { localStorage.setItem(SCOPE_KEY, scopeSelect.value); } catch(e){}
     renderCatalog();
@@ -2417,7 +2384,6 @@ window.addEventListener("resize", () => {
     setProgressEnabled(false, "Progresso indisponível…");
     updateProgressBar(0);
 
-    // Missing EPUBs
     if (item && item.missing) {
       elProgress.textContent = "EPUB em construção";
       showNotice(item.missingMessage || "⚠️ EPUB em construção.");
@@ -2522,10 +2488,17 @@ window.addEventListener("resize", () => {
       rendition.on("relocated", (location) => {
         savePosition(item, location);
         updateProgressUI(location);
+        // ✅ cover fix hook
+        adjustSpreadForCover(location);
       });
 
       rendition.on("rendered", () => {
         applyThemeToRendition();
+        // attempt to enforce cover logic after render too
+        try{
+          const loc = rendition && rendition.currentLocation ? rendition.currentLocation() : null;
+          if (loc) adjustSpreadForCover(loc);
+        }catch(e){}
       });
 
       if (savedCfi) {
@@ -2546,6 +2519,7 @@ window.addEventListener("resize", () => {
         await locReadyPromise;
         const loc = rendition && rendition.currentLocation ? rendition.currentLocation() : null;
         if (loc) updateProgressUI(loc);
+        if (loc) adjustSpreadForCover(loc);
       } catch(e) {}
 
     } catch (err) {
@@ -2572,6 +2546,7 @@ window.addEventListener("resize", () => {
     noteStack = [];
     updateNoteBackUI();
     showCatalog();
+    try { localStorage.setItem(UI_MODE_KEY, "catalog"); } catch(e) {}
   });
 
   document.addEventListener("keydown", (e) => {
@@ -2596,20 +2571,24 @@ window.addEventListener("resize", () => {
   initZen();
   syncJustifyHyphenButtons();
 
-// Double-page toggle (desktop)
-syncSpreadButton();
-btnSpread && btnSpread.addEventListener("click", async () => {
-  spreadOnDesktop = !spreadOnDesktop;
-  try { localStorage.setItem(SPREAD_KEY, spreadOnDesktop ? "1" : "0"); } catch(e){}
+  // Double-page toggle (desktop)
   syncSpreadButton();
+  btnSpread && btnSpread.addEventListener("click", async () => {
+    spreadOnDesktop = !spreadOnDesktop;
+    try { localStorage.setItem(SPREAD_KEY, spreadOnDesktop ? "1" : "0"); } catch(e){}
+    syncSpreadButton();
 
-  if (rendition) {
-    try { await applyFlowPaginated(true); } catch(e){}
-    applyThemeToRendition();
-  }
-});
+    if (rendition) {
+      try { await applyFlowPaginated(true); } catch(e){}
+      applyThemeToRendition();
+      try{
+        const loc = rendition && rendition.currentLocation ? rendition.currentLocation() : null;
+        if (loc) adjustSpreadForCover(loc);
+      }catch(e){}
+    }
+  });
 
-  // ✅ (AJOUT) restaurer scope tôt si possible (sinon updatePrivateUI forcera)
+  // restaurer scope tôt
   try{
     if (scopeSelect) {
       const s = localStorage.getItem(SCOPE_KEY);
@@ -2620,8 +2599,7 @@ btnSpread && btnSpread.addEventListener("click", async () => {
   updatePrivateUI();
   renderCatalog();
 
-
-  // ✅ Re-ouvrir automatiquement le dernier livre après refresh (si on était dans le lecteur)
+  // Re-ouvrir automatiquement le dernier livre après refresh (si on était dans le lecteur)
   try{
     const mode = localStorage.getItem(UI_MODE_KEY);
     const lastId = localStorage.getItem(LAST_BOOK_KEY);
