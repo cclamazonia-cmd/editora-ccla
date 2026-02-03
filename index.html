@@ -632,9 +632,9 @@ body.zen .progress-wrap{
   transform: translateY(-8px);
   filter: blur(6px);
   transition:
-    opacity .35s ease,
-    transform .35s ease,
-    filter .35s ease;
+    opacity .7s ease,
+    transform .7s ease,
+    filter .7s ease;
 }
 body.zen .fullscreen-exit{opacity:0.92; pointer-events:auto;}
 body.zen.ui-visible header,
@@ -645,6 +645,10 @@ body.zen.ui-visible .progress-wrap{
   pointer-events:auto;
   transform: translateY(0);
   filter: none;
+  transition:
+    opacity .2s ease,
+    transform .2s ease,
+    filter .2s ease;
 }
 /* Drawer */
 .drawer-backdrop{
@@ -1021,6 +1025,12 @@ body.night .btn *{ color: inherit !important; }
   // ✅ (AJOUT) mémorisation du scope catalogue
   const SCOPE_KEY = "catalogScope";
 
+  // ✅ (AJOUT) manter a leitura após refresh
+  const READER_OPEN_KEY = "readerOpen";
+  const LAST_BOOK_ID_KEY = "lastBookId";
+  const HASH_PREFIX = "#read=";
+
+
   // =======================
   // DOM
   // =======================
@@ -1201,7 +1211,34 @@ function syncSpreadButton(){
   function clearError() {
     elError.style.display = "none";
     elError.textContent = "";
+  
+  function setReaderState(open, bookId){
+    try{
+      if (open) {
+        sessionStorage.setItem(READER_OPEN_KEY, "1");
+        if (bookId) sessionStorage.setItem(LAST_BOOK_ID_KEY, String(bookId));
+      } else {
+        sessionStorage.removeItem(READER_OPEN_KEY);
+        sessionStorage.removeItem(LAST_BOOK_ID_KEY);
+      }
+    } catch(e){}
   }
+
+  function setReaderHash(bookId){
+    try{
+      if (!bookId) return;
+      const h = HASH_PREFIX + encodeURIComponent(String(bookId));
+      if (location.hash !== h) history.replaceState(null, "", h);
+    } catch(e){}
+  }
+
+  function clearReaderHash(){
+    try{
+      if ((location.hash || "").startsWith(HASH_PREFIX)) history.replaceState(null, "", location.pathname + location.search);
+    } catch(e){}
+  }
+
+}
 
   function showReader() {
     elCatalogo.style.display = "none";
@@ -1633,7 +1670,7 @@ window.addEventListener("resize", () => {
     if (!zenOn) return;
     document.body.classList.add("ui-visible");
     clearTimeout(uiHideTimer);
-    uiHideTimer = setTimeout(() => document.body.classList.remove("ui-visible"), 3200);
+    uiHideTimer = setTimeout(() => document.body.classList.remove("ui-visible"), 8000);
   }
   function initZen(){
     setZen(zenOn);
@@ -2268,6 +2305,10 @@ window.addEventListener("resize", () => {
   // ===== OPEN BOOK =====
   async function openBook(item) {
     clearError();
+    // ✅ manter o leitor aberto no refresh
+    setReaderState(true, item && item.id ? item.id : null);
+    setReaderHash(item && item.id ? item.id : null);
+
 
     currentItem = item;
     noteStack = [];
@@ -2428,6 +2469,9 @@ window.addEventListener("resize", () => {
 
   btnBack.addEventListener("click", async () => {
     clearError();
+    // ✅ voltar ao catálogo: limpar estado de leitura
+    setReaderState(false, null);
+    clearReaderHash();
     stopReadingTimer();
     closeDrawer();
     if (isFullscreen()) await exitFullscreen();
@@ -2481,6 +2525,30 @@ btnSpread && btnSpread.addEventListener("click", async () => {
 
   updatePrivateUI();
   renderCatalog();
+
+  // ✅ (AJOUT) restaurar leitor após refresh (hash tem prioridade)
+  (async () => {
+    try{
+      const hash = String(location.hash || "");
+      let wantedId = "";
+      if (hash.startsWith(HASH_PREFIX)) {
+        wantedId = decodeURIComponent(hash.slice(HASH_PREFIX.length)).trim();
+      } else {
+        const shouldRestore = sessionStorage.getItem(READER_OPEN_KEY) === "1";
+        if (shouldRestore) wantedId = String(sessionStorage.getItem(LAST_BOOK_ID_KEY) || "").trim();
+      }
+      if (!wantedId) return;
+
+      const item = getAllBooks().find(x => x.id === wantedId);
+      if (!item) {
+        // livro não acessível (ex: área restrita bloqueada)
+        setReaderState(false, null);
+        clearReaderHash();
+        return;
+      }
+      await openBook(item);
+    } catch(e){}
+  })();
 
 })();
 </script>
