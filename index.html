@@ -890,8 +890,7 @@ body.night .btn *{ color: inherit !important; }
         </label>
 
         <button class="btn btn-primary" id="unlockBtn" type="button">Desbloquear</button>
-        <button class="btn" id="lockBtn" type="button">Bloquear</button>
-        <label title="Manter desbloqueado neste dispositivo">
+                <label title="Manter desbloqueado neste dispositivo">
           <input id="rememberChk" type="checkbox">
           lembrar
         </label>
@@ -1025,7 +1024,12 @@ body.night .btn *{ color: inherit !important; }
   // ✅ (AJOUT) mémorisation du scope catalogue
   const SCOPE_KEY = "catalogScope";
 
-  // =======================
+  
+
+  // ✅ (AJOUT) mémorisation de l\'état UI (rester dans le lecteur après refresh)
+  const UI_MODE_KEY = "uiMode";        // "catalog" | "reader"
+  const LAST_BOOK_KEY = "lastBookId";  // id du dernier livre ouvert
+// =======================
   // DOM
   // =======================
   const elCatalogo = document.getElementById("catalogo");
@@ -1077,7 +1081,6 @@ body.night .btn *{ color: inherit !important; }
 
   const pwInput = document.getElementById("pwInput");
   const unlockBtn = document.getElementById("unlockBtn");
-  const lockBtn = document.getElementById("lockBtn");
   const rememberChk = document.getElementById("rememberChk");
   const restrictedStatus = document.getElementById("restrictedStatus");
   const privateArea = document.getElementById("privateArea");
@@ -1468,6 +1471,8 @@ html, body {
   background: ${bg} !important;
   color: ${fg} !important;
   font-family: ${fontFamily} !important;
+    try { localStorage.setItem(UI_MODE_KEY, "reader"); } catch(e) {}
+    try { localStorage.setItem(UI_MODE_KEY, "catalog"); } catch(e) {}
 }
 
 * {
@@ -1492,6 +1497,35 @@ body {
 }
 
 img, svg, video, canvas { background: transparent !important; }
+
+/* Cover & images: keep proportions, center horizontally */
+img, svg {
+  max-width: 100% !important;
+  height: auto !important;
+  object-fit: contain !important;
+  display: block !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+/* If the page is basically a single image (typical cover), center it on the page */
+body:has(> img:only-child),
+body:has(> figure:only-child){
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+}
+body:has(> img:only-child) > img{
+  max-height: 96vh !important;
+  width: auto !important;
+}
+body:has(> figure:only-child) figure{ margin: 0 !important; }
+body:has(> figure:only-child) img{
+  max-height: 96vh !important;
+  width: auto !important;
+}
+
 table, thead, tbody, tr, td, th { background: transparent !important; }
 `.trim();
   }
@@ -2234,13 +2268,6 @@ window.addEventListener("resize", () => {
       restrictedStatus.textContent = "❌ Erro ao verificar senha";
     }
   });
-
-  lockBtn.addEventListener("click", () => {
-    clearUnlocked();
-    updatePrivateUI();
-    resetPasswordVisibility();
-  });
-
   pwInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") unlockBtn.click();
   });
@@ -2376,6 +2403,8 @@ window.addEventListener("resize", () => {
     clearError();
 
     currentItem = item;
+    try { localStorage.setItem(LAST_BOOK_KEY, String(item && item.id ? item.id : "")); } catch(e) {}
+    try { localStorage.setItem(UI_MODE_KEY, "reader"); } catch(e) {}
     noteStack = [];
     updateNoteBackUI();
     readingSeconds = loadReadingTime(item);
@@ -2590,6 +2619,22 @@ btnSpread && btnSpread.addEventListener("click", async () => {
 
   updatePrivateUI();
   renderCatalog();
+
+
+  // ✅ Re-ouvrir automatiquement le dernier livre après refresh (si on était dans le lecteur)
+  try{
+    const mode = localStorage.getItem(UI_MODE_KEY);
+    const lastId = localStorage.getItem(LAST_BOOK_KEY);
+    if (mode === "reader" && lastId) {
+      const list = isUnlocked() ? BOOKS_PUBLIC.concat(BOOKS_PRIVATE) : BOOKS_PUBLIC.slice();
+      const item = list.find(b => b && b.id === lastId);
+      if (item) {
+        openBook(item);
+      } else {
+        localStorage.setItem(UI_MODE_KEY, "catalog");
+      }
+    }
+  } catch(e){}
 
 })();
 </script>
