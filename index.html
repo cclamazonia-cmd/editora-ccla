@@ -872,8 +872,10 @@ body.night .btn *{ color: inherit !important; }
       <button class="btn" id="clearSearchBtn" type="button" title="Limpar pesquisa" aria-label="Limpar pesquisa">Limpar</button>
     </div>
 
+    <div id="publicArea">
     <h3 style="margin:14px 0 10px;font-size:16px;">Catálogo público</h3>
     <div id="booksPublic"></div>
+    </div>
 
     <div class="restricted-box" aria-label="Acesso restrito">
       <h3 style="margin:0 0 8px;font-size:16px;">Acesso restrito</h3>
@@ -890,7 +892,7 @@ body.night .btn *{ color: inherit !important; }
         </label>
 
         <button class="btn btn-primary" id="unlockBtn" type="button">Desbloquear</button>
-                <label title="Manter desbloqueado neste dispositivo">
+        <label title="Manter desbloqueado neste dispositivo">
           <input id="rememberChk" type="checkbox">
           lembrar
         </label>
@@ -1024,12 +1026,7 @@ body.night .btn *{ color: inherit !important; }
   // ✅ (AJOUT) mémorisation du scope catalogue
   const SCOPE_KEY = "catalogScope";
 
-  
-
-  // ✅ (AJOUT) mémorisation de l\'état UI (rester dans le lecteur après refresh)
-  const UI_MODE_KEY = "uiMode";        // "catalog" | "reader"
-  const LAST_BOOK_KEY = "lastBookId";  // id du dernier livre ouvert
-// =======================
+  // =======================
   // DOM
   // =======================
   const elCatalogo = document.getElementById("catalogo");
@@ -1081,6 +1078,7 @@ body.night .btn *{ color: inherit !important; }
 
   const pwInput = document.getElementById("pwInput");
   const unlockBtn = document.getElementById("unlockBtn");
+  const lockBtn = document.getElementById("lockBtn");
   const rememberChk = document.getElementById("rememberChk");
   const restrictedStatus = document.getElementById("restrictedStatus");
   const privateArea = document.getElementById("privateArea");
@@ -1176,92 +1174,7 @@ function syncSpreadButton(){
     }[m]));
   }
 
-
-  // Normalize strings for search/sort (case-insensitive, accent-insensitive)
-  function normalize(s){
-    return String(s || "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")  // strip diacritics
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-
-  // Normalize password input (avoids NFC/NFD mismatch and exotic hyphens)
-  function normalizePassword(s){
-    return String(s || "")
-      .trim()
-      .replace(/[\u2010-\u2015\u2212]/g, "-")
-      .normalize("NFC");
-  }
-
-  // SHA-256 fallback for non-secure contexts (e.g. file://) where crypto.subtle is unavailable
-  // Returns hex string.
-  function sha256HexFallback(message){
-    function rotr(n,x){ return (x >>> n) | (x << (32-n)); }
-    function ch(x,y,z){ return (x & y) ^ (~x & z); }
-    function maj(x,y,z){ return (x & y) ^ (x & z) ^ (y & z); }
-    function Sigma0(x){ return rotr(2,x) ^ rotr(13,x) ^ rotr(22,x); }
-    function Sigma1(x){ return rotr(6,x) ^ rotr(11,x) ^ rotr(25,x); }
-    function sigma0(x){ return rotr(7,x) ^ rotr(18,x) ^ (x >>> 3); }
-    function sigma1(x){ return rotr(17,x) ^ rotr(19,x) ^ (x >>> 10); }
-
-    const K = new Uint32Array([
-      0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-      0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-      0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-      0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
-      0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
-      0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
-      0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
-      0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
-    ]);
-
-    let h0=0x6a09e667, h1=0xbb67ae85, h2=0x3c6ef372, h3=0xa54ff53a;
-    let h4=0x510e527f, h5=0x9b05688c, h6=0x1f83d9ab, h7=0x5be0cd19;
-
-    const enc = new TextEncoder();
-    const bytes = enc.encode(message);
-    const bitLen = bytes.length * 8;
-
-    const padded = new Uint8Array(((bytes.length + 9 + 63) >> 6) << 6);
-    padded.set(bytes,0);
-    padded[bytes.length] = 0x80;
-    const view = new DataView(padded.buffer);
-
-    const hi = Math.floor(bitLen / 0x100000000);
-    const lo = bitLen >>> 0;
-    view.setUint32(padded.length - 8, hi);
-    view.setUint32(padded.length - 4, lo);
-
-    const W = new Uint32Array(64);
-
-    for (let i=0; i<padded.length; i+=64){
-      for (let t=0; t<16; t++){
-        W[t] = view.getUint32(i + t*4);
-      }
-      for (let t=16; t<64; t++){
-        W[t] = (sigma1(W[t-2]) + W[t-7] + sigma0(W[t-15]) + W[t-16]) >>> 0;
-      }
-
-      let a=h0,b=h1,c=h2,d=h3,e=h4,f=h5,g=h6,h=h7;
-
-      for (let t=0; t<64; t++){
-        const T1 = (h + Sigma1(e) + ch(e,f,g) + K[t] + W[t]) >>> 0;
-        const T2 = (Sigma0(a) + maj(a,b,c)) >>> 0;
-        h=g; g=f; f=e;
-        e=(d + T1) >>> 0;
-        d=c; c=b; b=a;
-        a=(T1 + T2) >>> 0;
-      }
-
-      h0=(h0+a)>>>0; h1=(h1+b)>>>0; h2=(h2+c)>>>0; h3=(h3+d)>>>0;
-      h4=(h4+e)>>>0; h5=(h5+f)>>>0; h6=(h6+g)>>>0; h7=(h7+h)>>>0;
-    }
-
-    const out = new Uint32Array([h0,h1,h2,h3,h4,h5,h6,h7]);
-    return Array.from(out).map(x => x.toString(16).padStart(8,"0")).join("");
-  }
+  \1
 
   async function fetchArrayBufferFirst(paths){
     for (const p of paths){
@@ -1471,8 +1384,6 @@ html, body {
   background: ${bg} !important;
   color: ${fg} !important;
   font-family: ${fontFamily} !important;
-    try { localStorage.setItem(UI_MODE_KEY, "reader"); } catch(e) {}
-    try { localStorage.setItem(UI_MODE_KEY, "catalog"); } catch(e) {}
 }
 
 * {
@@ -1496,36 +1407,25 @@ body {
   margin: 0 !important;
 }
 
-img, svg, video, canvas { background: transparent !important; }
 
-/* Cover & images: keep proportions, center horizontally */
-img, svg {
-  max-width: 100% !important;
-  height: auto !important;
-  object-fit: contain !important;
-  display: block !important;
-  margin-left: auto !important;
-  margin-right: auto !important;
-}
-
-/* If the page is basically a single image (typical cover), center it on the page */
-body:has(> img:only-child),
-body:has(> figure:only-child){
+/* Cover page: if the document is just an image, center it and keep proportions */
+body.ccla-cover-page{
+  padding: 0 !important;
+  margin: 0 !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  padding: 0 !important;
 }
-body:has(> img:only-child) > img{
-  max-height: 96vh !important;
+body.ccla-cover-page img{
+  max-width: 100% !important;
+  max-height: 100% !important;
+  height: auto !important;
   width: auto !important;
-}
-body:has(> figure:only-child) figure{ margin: 0 !important; }
-body:has(> figure:only-child) img{
-  max-height: 96vh !important;
-  width: auto !important;
+  object-fit: contain !important;
 }
 
+
+img, svg, video, canvas { background: transparent !important; }
 table, thead, tbody, tr, td, th { background: transparent !important; }
 `.trim();
   }
@@ -1567,6 +1467,19 @@ table, thead, tbody, tr, td, th { background: transparent !important; }
             if (!doc) return;
             if (!doc.documentElement.getAttribute("lang")) doc.documentElement.setAttribute("lang","pt-BR");
             if (doc.body && !doc.body.getAttribute("lang")) doc.body.setAttribute("lang","pt-BR");
+
+            try{
+              // Mark "cover-like" pages (single image, no meaningful text) so CSS can center it.
+              const body = doc.body;
+              if (body) {
+                const imgs = body.querySelectorAll("img");
+                const text = (body.textContent || "").replace(/\s+/g," ").trim();
+                const hasOneImage = imgs && imgs.length === 1;
+                const textIsTrivial = text.length <= 2; // often empty or just whitespace
+                if (hasOneImage && textIsTrivial) body.classList.add("ccla-cover-page");
+              }
+            } catch(e){}
+
           } catch(e){}
         });
       } catch(e){}
@@ -2231,12 +2144,8 @@ window.addEventListener("resize", () => {
   async function sha256Hex(text){
     const enc = new TextEncoder();
     const data = enc.encode(text);
-    if (globalThis.crypto && crypto.subtle && globalThis.isSecureContext) {
-      const hash = await crypto.subtle.digest("SHA-256", data);
-      return bytesToHex(new Uint8Array(hash));
-    }
-    // file:// and other non-secure contexts
-    return sha256HexFallback(text);
+    const hash = await crypto.subtle.digest("SHA-256", data);
+    return bytesToHex(new Uint8Array(hash));
   }
 
   if (showPwChk) {
@@ -2245,7 +2154,7 @@ window.addEventListener("resize", () => {
   resetPasswordVisibility();
 
   unlockBtn.addEventListener("click", async () => {
-    const pw = normalizePassword(pwInput.value || "");
+    const pw = (pwInput.value || "").trim();
     if (!pw) {
       restrictedStatus.textContent = "⚠️ Digite a senha";
       return;
@@ -2268,6 +2177,13 @@ window.addEventListener("resize", () => {
       restrictedStatus.textContent = "❌ Erro ao verificar senha";
     }
   });
+
+  lockBtn.addEventListener("click", () => {
+    clearUnlocked();
+    updatePrivateUI();
+    resetPasswordVisibility();
+  });
+
   pwInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") unlockBtn.click();
   });
@@ -2362,11 +2278,23 @@ window.addEventListener("resize", () => {
     const publicList = filterAndSort(BOOKS_PUBLIC);
     const privateList = filterAndSort(BOOKS_PRIVATE);
 
-    // ✅ Public catalogue is ALWAYS visible, no matter what.
-    elBooksPublic.style.display = "block";
-    renderListInto(elBooksPublic, publicList);
+    // Public is always available, but the user can choose to view ONLY the restricted list
+    const publicArea = document.getElementById("publicArea");
+    const wantOnlyPrivate = (scope === "private") && unlocked;
+    if (publicArea) publicArea.style.display = wantOnlyPrivate ? "none" : "block";
 
-    const showPrivate = unlocked && (scope === "private" || scope === "all");
+    // Render public (unless hidden by scope)
+    if (!wantOnlyPrivate) {
+      elBooksPublic.style.display = "block";
+      renderListInto(elBooksPublic, publicList);
+      if (publicList.length === 0) {
+        elBooksPublic.innerHTML = `<div class="notice">Nenhum resultado no catálogo público.</div>`;
+      }
+    } else {
+      // keep DOM clean when hidden
+      elBooksPublic.innerHTML = "";
+    }
+const showPrivate = unlocked && (scope === "private" || scope === "all");
     privateArea.style.display = unlocked ? "block" : "none";
     if (unlocked) {
       elBooksPrivate.style.display = showPrivate ? "block" : "none";
@@ -2375,9 +2303,6 @@ window.addEventListener("resize", () => {
       elBooksPrivate.innerHTML = "";
     }
 
-    if (publicList.length === 0) {
-      elBooksPublic.innerHTML = `<div class="notice">Nenhum resultado no catálogo público.</div>`;
-    }
     if (showPrivate && privateList.length === 0) {
       elBooksPrivate.innerHTML = `<div class="notice">Nenhum resultado no catálogo restrito.</div>`;
     }
@@ -2403,8 +2328,6 @@ window.addEventListener("resize", () => {
     clearError();
 
     currentItem = item;
-    try { localStorage.setItem(LAST_BOOK_KEY, String(item && item.id ? item.id : "")); } catch(e) {}
-    try { localStorage.setItem(UI_MODE_KEY, "reader"); } catch(e) {}
     noteStack = [];
     updateNoteBackUI();
     readingSeconds = loadReadingTime(item);
@@ -2520,6 +2443,12 @@ window.addEventListener("resize", () => {
       if (btnPrefs) btnPrefs.onclick = () => openDrawer("prefs");
 
       rendition.on("relocated", (location) => {
+        // If we are on the very first spine item (usually cover), force single-page display even when 2p is enabled.
+        try{
+          const idx = location && location.start ? location.start.index : null;
+          if (idx === 0) rendition.spread("none");
+          else rendition.spread(desiredSpread());
+        } catch(e){}
         savePosition(item, location);
         updateProgressUI(location);
       });
@@ -2619,22 +2548,6 @@ btnSpread && btnSpread.addEventListener("click", async () => {
 
   updatePrivateUI();
   renderCatalog();
-
-
-  // ✅ Re-ouvrir automatiquement le dernier livre après refresh (si on était dans le lecteur)
-  try{
-    const mode = localStorage.getItem(UI_MODE_KEY);
-    const lastId = localStorage.getItem(LAST_BOOK_KEY);
-    if (mode === "reader" && lastId) {
-      const list = isUnlocked() ? BOOKS_PUBLIC.concat(BOOKS_PRIVATE) : BOOKS_PUBLIC.slice();
-      const item = list.find(b => b && b.id === lastId);
-      if (item) {
-        openBook(item);
-      } else {
-        localStorage.setItem(UI_MODE_KEY, "catalog");
-      }
-    }
-  } catch(e){}
 
 })();
 </script>
