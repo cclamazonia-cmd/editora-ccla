@@ -2143,6 +2143,67 @@ table, thead, tbody, tr, td, th { background: transparent !important; }
     try { rendition.spread(onCover ? "none" : desiredSpread()); } catch(e){}
   }
 
+  // ===========================================================
+  // ✅ PATCH: COVER RATIO FIX (no stretching, no forced padding)
+  // - Detect cover section and apply "contain + centered" styling
+  // - Also force spread = none on cover (so it's never shown as "2p")
+  // ===========================================================
+  const COVER_FIX_STYLE_ID = "ccla-cover-fix-style";
+  function isCoverSection(section){
+    try{
+      const props = (section && section.properties) ? section.properties : [];
+      if (props && typeof props.includes === "function" && props.includes("cover-image")) return true;
+      const href = String((section && section.href) || "");
+      const idref = String((section && section.idref) || "");
+      return /cover/i.test(href) || /cover/i.test(idref);
+    } catch(e){
+      return false;
+    }
+  }
+
+  function applyCoverFixToView(section, view){
+    try{
+      if (!view || !view.document) return;
+      const doc = view.document;
+
+      // mark/unmark
+      doc.documentElement.classList.toggle("is-cover", !!isCoverSection(section));
+
+      // inject (once per iframe)
+      if (!doc.getElementById(COVER_FIX_STYLE_ID)) {
+        const st = doc.createElement("style");
+        st.id = COVER_FIX_STYLE_ID;
+        st.type = "text/css";
+        st.textContent = `
+          html.is-cover, html.is-cover body{
+            height:100% !important;
+            margin:0 !important;
+            padding:0 !important;
+            background:transparent !important;
+          }
+          /* center everything on cover */
+          html.is-cover body{
+            display:flex !important;
+            align-items:center !important;
+            justify-content:center !important;
+          }
+          /* do NOT stretch cover images */
+          html.is-cover img{
+            max-width:100% !important;
+            max-height:100% !important;
+            width:auto !important;
+            height:auto !important;
+            object-fit:contain !important;
+            display:block !important;
+            margin:auto !important;
+          }
+        `.trim();
+        (doc.head || doc.documentElement).appendChild(st);
+      }
+    } catch(e){}
+  }
+  // ===========================================================
+
   // ===== PRIVATE ACCESS =====
   function getStore(remember){
     return remember ? localStorage : sessionStorage;
@@ -2488,13 +2549,15 @@ table, thead, tbody, tr, td, th { background: transparent !important; }
       rendition.on("relocated", (location) => {
         savePosition(item, location);
         updateProgressUI(location);
-        // ✅ cover fix hook
+        // keep your spread logic
         adjustSpreadForCover(location);
       });
 
-      rendition.on("rendered", () => {
+      // ✅ PATCH: apply cover-fix on each rendered view
+      rendition.on("rendered", (section, view) => {
         applyThemeToRendition();
-        // attempt to enforce cover logic after render too
+        applyCoverFixToView(section, view);
+        // also ensure spread doesn't show cover as 2 pages
         try{
           const loc = rendition && rendition.currentLocation ? rendition.currentLocation() : null;
           if (loc) adjustSpreadForCover(loc);
