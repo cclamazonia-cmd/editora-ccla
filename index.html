@@ -868,7 +868,7 @@ body.night .btn *{ color: inherit !important; }
       <button class="btn" id="clearSearchBtn" type="button" title="Limpar pesquisa" aria-label="Limpar pesquisa">Limpar</button>
     </div>
 
-    <h3 style="margin:14px 0 10px;font-size:16px;">Catálogo público</h3>
+    <h3 id="publicHeading" style="margin:14px 0 10px;font-size:16px;">Catálogo público</h3>
     <div id="booksPublic"></div>
 
     <div class="restricted-box" aria-label="Acesso restrito">
@@ -896,7 +896,7 @@ body.night .btn *{ color: inherit !important; }
       <div class="restricted-status" id="restrictedStatus">🔒 Bloqueado</div>
 
       <div id="privateArea" style="display:none; margin-top:14px;">
-        <h3 style="margin:0 0 10px;font-size:16px;">Catálogo restrito</h3>
+        <h3 id="privateHeading" style="margin:0 0 10px;font-size:16px;">Catálogo restrito</h3>
         <div id="booksPrivate"></div>
       </div>
     </div>
@@ -1015,6 +1015,9 @@ body.night .btn *{ color: inherit !important; }
   const PRIVATE_PASSWORD_HASH_HEX = "e9b4c08b108ef2cb1bd979acab32c28d111e163431fb5856c67f8a1b2089e5ea";
   const ACCESS_KEY = "privateAccess";
   const ACCESS_HASH_KEY = "privateAccessHash";
+
+  // Reader state: keep current book on refresh
+  const CURRENT_BOOK_KEY = "currentBookId";
 
   // ✅ (AJOUT) mémorisation du scope catalogue
   const SCOPE_KEY = "catalogScope";
@@ -1214,6 +1217,30 @@ function syncSpreadButton(){
     document.body.classList.remove("reader-open");
   }
 
+  function setReaderState(bookId){
+    try{ sessionStorage.setItem(CURRENT_BOOK_KEY, String(bookId||"")); }catch(e){}
+    try{
+      const url = location.href.split("#")[0] + "#read=" + encodeURIComponent(String(bookId||""));
+      history.replaceState(null, "", url);
+    }catch(e){}
+  }
+  function clearReaderState(){
+    try{ sessionStorage.removeItem(CURRENT_BOOK_KEY); }catch(e){}
+    try{ history.replaceState(null, "", location.href.split("#")[0]); }catch(e){}
+  }
+  function getRequestedBookId(){
+    try{
+      const h = String(location.hash || "");
+      const m = h.match(/#read=([^&]+)/);
+      if (m && m[1]) return decodeURIComponent(m[1]);
+    }catch(e){}
+    try{
+      const v = sessionStorage.getItem(CURRENT_BOOK_KEY);
+      if (v) return v;
+    }catch(e){}
+    return null;
+  }
+
   function showSavedBadgeDebounced() {
     if (!elSaveBadge) return;
     const now = Date.now();
@@ -1393,7 +1420,13 @@ body {
   margin: 0 !important;
 }
 
-img, svg, video, canvas { background: transparent !important; }
+img, svg, video, canvas { 
+  background: transparent !important; 
+  max-width: 100% !important;
+  height: auto !important;
+}
+img{ object-fit: contain !important; }
+
 table, thead, tbody, tr, td, th { background: transparent !important; }
 `.trim();
   }
@@ -2097,7 +2130,7 @@ window.addEventListener("resize", () => {
 
       if (unlocked) {
         // Si déverrouillé, on évite de "perdre" le privé au refresh
-        scopeSelect.value = (savedScope === "public") ? "all" : savedScope;
+        scopeSelect.value = savedScope;
       } else {
         // Si verrouillé, on empêche l'affichage "private/all"
         scopeSelect.value = (savedScope === "private" || savedScope === "all") ? "public" : savedScope;
@@ -2244,28 +2277,39 @@ window.addEventListener("resize", () => {
     const publicList = filterAndSort(BOOKS_PUBLIC);
     const privateList = filterAndSort(BOOKS_PRIVATE);
 
-    // ✅ Public catalogue is ALWAYS visible, no matter what.
-    elBooksPublic.style.display = "block";
-    renderListInto(elBooksPublic, publicList);
+    const publicHeading = document.getElementById("publicHeading");
+    const privateHeading = document.getElementById("privateHeading");
 
-    const showPrivate = unlocked && (scope === "private" || scope === "all");
+    const showPublic = (scope === "public" || scope === "all");
+    const showPrivateList = unlocked && (scope === "private" || scope === "all");
+
+    // Public
+    if (publicHeading) publicHeading.style.display = showPublic ? "block" : "none";
+    elBooksPublic.style.display = showPublic ? "block" : "none";
+    if (showPublic) renderListInto(elBooksPublic, publicList);
+    else elBooksPublic.innerHTML = "";
+
+    // Private (area visible only when unlocked; list depends on scope)
     privateArea.style.display = unlocked ? "block" : "none";
+    if (privateHeading) privateHeading.style.display = showPrivateList ? "block" : "none";
+
     if (unlocked) {
-      elBooksPrivate.style.display = showPrivate ? "block" : "none";
-      if (showPrivate) renderListInto(elBooksPrivate, privateList);
+      elBooksPrivate.style.display = showPrivateList ? "block" : "none";
+      if (showPrivateList) renderListInto(elBooksPrivate, privateList);
+      else elBooksPrivate.innerHTML = "";
     } else {
       elBooksPrivate.innerHTML = "";
     }
 
-    if (publicList.length === 0) {
+    if (showPublic && publicList.length === 0) {
       elBooksPublic.innerHTML = `<div class="notice">Nenhum resultado no catálogo público.</div>`;
     }
-    if (showPrivate && privateList.length === 0) {
+    if (showPrivateList && privateList.length === 0) {
       elBooksPrivate.innerHTML = `<div class="notice">Nenhum resultado no catálogo restrito.</div>`;
     }
   }
 
-  searchInput && searchInput.addEventListener("input", renderCatalog);
+   && searchInput.addEventListener("input", renderCatalog);
   sortSelect && sortSelect.addEventListener("change", renderCatalog);
 
   // ✅ (MODIF) mémoriser le scope à chaque changement
@@ -2288,6 +2332,7 @@ window.addEventListener("resize", () => {
     try { document.getElementById("viewer").innerHTML = ""; } catch(e){}
 
     currentItem = item;
+    setReaderState(item && item.id ? item.id : "");
     noteStack = [];
     updateNoteBackUI();
     readingSeconds = loadReadingTime(item);
@@ -2452,6 +2497,7 @@ window.addEventListener("resize", () => {
     if (isFullscreen()) await exitFullscreen();
     noteStack = [];
     updateNoteBackUI();
+    clearReaderState();
     showCatalog();
   });
 
@@ -2500,6 +2546,26 @@ btnSpread && btnSpread.addEventListener("click", async () => {
 
   updatePrivateUI();
   renderCatalog();
+
+  // Restore reader on refresh (hash or sessionStorage)
+  const requestedId = getRequestedBookId();
+  if (requestedId) {
+    const unlocked = isUnlocked();
+    const item = (BOOKS_PUBLIC.concat(BOOKS_PRIVATE)).find(b => b.id === requestedId) || null;
+    if (item) {
+      const isPrivate = BOOKS_PRIVATE.some(b => b.id === requestedId);
+      if (!isPrivate || unlocked) {
+        openBook(item);
+      } else {
+        // Private book requested but locked: stay on catalog and hint
+        restrictedStatus.textContent = "🔒 Bloqueado (digite a senha para abrir o livro restrito)";
+        clearReaderState();
+      }
+    } else {
+      clearReaderState();
+    }
+  }
+
 
 })();
 </script>
