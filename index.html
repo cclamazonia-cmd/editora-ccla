@@ -1005,7 +1005,7 @@ body.night .btn *{ color: inherit !important; }
       file: "economia-autogestionaria.epub",
       cover: "https://cclamazonia.noblogs.org/files/2026/01/Capa-economia-autogestionaria.png",
       tags: ["Economia", "socialismo libertário", "autogestão económica"],
-      missing: false,
+      missing: true,
       missingMessage: "⚠️ EPUB em construção.\n\n(Arquivo ainda em produção / não publicado.)"
     }
   ];
@@ -1020,6 +1020,10 @@ body.night .btn *{ color: inherit !important; }
 
   // ✅ (AJOUT) mémorisation du scope catalogue
   const SCOPE_KEY = "catalogScope";
+
+
+  // ✅ Nettoyage: supprimer tout accès restreint qui aurait été persisté par erreur (anciennes versions)
+  try{ localStorage.removeItem(ACCESS_KEY); localStorage.removeItem(ACCESS_HASH_KEY); } catch(e){}
 
   // =======================
   // DOM
@@ -2043,26 +2047,23 @@ window.addEventListener("resize", () => {
   tapRight && tapRight.addEventListener("click", safeNext);
 
   // ===== PRIVATE ACCESS =====
-  function getStore(remember){
-    return remember ? localStorage : sessionStorage;
-  }
-
+  // ✅ Comportamento pedido: o acesso restrito deve EXPIRAR ao fechar o navegador.
+  // Portanto, usamos SOMENTE sessionStorage (nunca localStorage).
   function isUnlocked(){
-    try {
-      if (localStorage.getItem(ACCESS_KEY) === "1") return true;
-      if (sessionStorage.getItem(ACCESS_KEY) === "1") return true;
-      return false;
-    } catch(e){ return false; }
+    try { return sessionStorage.getItem(ACCESS_KEY) === "1"; }
+    catch(e){ return false; }
   }
 
-  function setUnlocked(remember){
-    const store = getStore(remember);
-    store.setItem(ACCESS_KEY, "1");
-    if (PRIVATE_PASSWORD_HASH_HEX) store.setItem(ACCESS_HASH_KEY, PRIVATE_PASSWORD_HASH_HEX);
+  function setUnlocked(){
+    try{
+      sessionStorage.setItem(ACCESS_KEY, "1");
+      if (PRIVATE_PASSWORD_HASH_HEX) sessionStorage.setItem(ACCESS_HASH_KEY, PRIVATE_PASSWORD_HASH_HEX);
+    } catch(e){}
   }
 
   function clearUnlocked(){
-    try {
+    try{
+      // limpa também resíduos antigos (caso versões anteriores tenham gravado em localStorage)
       localStorage.removeItem(ACCESS_KEY);
       localStorage.removeItem(ACCESS_HASH_KEY);
       sessionStorage.removeItem(ACCESS_KEY);
@@ -2190,17 +2191,6 @@ window.addEventListener("resize", () => {
       });
     });
   }
-
-
-  // Event delegation fallback: if for any reason individual listeners are not attached,
-  // this will still open books when clicking the "Ler" buttons.
-  elCatalogo && elCatalogo.addEventListener("click", (ev) => {
-    const btn = ev.target && ev.target.closest ? ev.target.closest("button[data-book]") : null;
-    if (!btn) return;
-    const id = btn.getAttribute("data-book");
-    const item = getAllBooks().find(x => x.id === id);
-    if (item) openBook(item);
-  });
 
   function getAllBooks(){
     const unlocked = isUnlocked();
@@ -2331,34 +2321,13 @@ window.addEventListener("resize", () => {
       hardCssHookInstalled = false;
       noteHookInstalled = false;
 
-      
-      // Try several candidate paths so local copies / different folder layouts still work.
-      const file = String(item.file || "");
-      const candidates = [];
-      if (/^https?:\/\//i.test(file)) {
-        candidates.push(file);
-      } else {
-        candidates.push("epubs/" + file);
-        candidates.push(file);
-        candidates.push("books/" + file);
-      }
+      const path = "epubs/" + item.file;
 
-      let arrayBuffer = null;
-      let lastErr = null;
-      for (const path of candidates) {
-        try{
-          const resp = await fetch(path, {cache:"no-store"});
-          if (!resp.ok) throw new Error("HTTP " + resp.status + " @ " + path);
-          arrayBuffer = await resp.arrayBuffer();
-          lastErr = null;
-          break;
-        } catch(e){
-          lastErr = e;
-        }
-      }
-      if (!arrayBuffer) throw lastErr || new Error("Falha ao carregar o arquivo EPUB");
+      const resp = await fetch(path);
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const arrayBuffer = await resp.arrayBuffer();
 
-book = window.ePub(arrayBuffer);
+      book = window.ePub(arrayBuffer);
 
       locReadyPromise = (book.ready ? book.ready.then(() => ensureLocations(item)) : ensureLocations(item));
       locReadyPromise.then((ok) => {
