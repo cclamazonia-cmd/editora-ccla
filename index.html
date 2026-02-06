@@ -1009,7 +1009,7 @@ body.night .btn *{ color: inherit !important; }
       file: "economia-autogestionaria.epub",
       cover: "https://cclamazonia.noblogs.org/files/2026/01/Capa-economia-autogestionaria.png",
       tags: ["Economia", "socialismo libertário", "autogestão económica"],
-      missing: true,
+      missing: false,
       missingMessage: "⚠️ EPUB em construção.\n\n(Arquivo ainda em produção / não publicado.)"
     }
   ];
@@ -2361,39 +2361,40 @@ window.addEventListener("resize", () => {
       hardCssHookInstalled = false;
       noteHookInstalled = false;
 
-      // Fetch EPUB (robust): try as-is, then try adding/removing ".epub" if the first attempt fails.
-      async function fetchEpubArrayBuffer(file){
-        const base = "epubs/";
-        const tryPaths = [];
-        const f = String(file || "");
-        if (f) tryPaths.push(base + f);
+      const candidates = [
+        "epubs/" + item.file,
+        item.file
+      ];
 
-        const hasExt = /\.epub$/i.test(f);
-        if (f) {
-          if (hasExt) tryPaths.push(base + f.replace(/\.epub$/i, "")); // without extension
-          else tryPaths.push(base + f + ".epub"); // with extension
-        }
-
-        // de-duplicate while preserving order
-        const seen = new Set();
-        const paths = tryPaths.filter(x => x && !seen.has(x) && (seen.add(x), true));
-
-        let lastErr = null;
-        for (const path of paths){
-          try{
-            const resp = await fetch(path);
-            if (!resp.ok) { lastErr = new Error("HTTP " + resp.status); continue; }
-            return await resp.arrayBuffer();
-          } catch(e){
-            lastErr = e;
-          }
-        }
-        throw lastErr || new Error("HTTP 404");
+      async function tryOpenWith(url){
+        const b = window.ePub(url);
+        // Ensure the package is actually reachable (will reject on 404 / network errors)
+        if (b && b.ready) await b.ready;
+        return b;
       }
 
-      const arrayBuffer = await fetchEpubArrayBuffer(item.file);
+      let openedUrl = null;
+      let tmpBook = null;
+      let lastErr = null;
 
-      book = window.ePub(arrayBuffer);
+      for (const u of candidates){
+        try{
+          tmpBook = await tryOpenWith(u);
+          openedUrl = u;
+          break;
+        } catch(e){
+          lastErr = e;
+          try{ tmpBook && tmpBook.destroy && tmpBook.destroy(); } catch(_e){}
+          tmpBook = null;
+        }
+      }
+
+      if (!tmpBook){
+        throw new Error("EPUB não encontrado. Verifique o caminho: " + candidates.join(" | "));
+      }
+
+      book = tmpBook;
+
 
       locReadyPromise = (book.ready ? book.ready.then(() => ensureLocations(item)) : ensureLocations(item));
       locReadyPromise.then((ok) => {
