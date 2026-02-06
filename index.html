@@ -1004,9 +1004,7 @@ body.night .btn *{ color: inherit !important; }
       author: "Abraham Guillén (1990)",
       file: "economia-autogestionaria.epub",
       cover: "https://cclamazonia.noblogs.org/files/2026/01/Capa-economia-autogestionaria.png",
-      tags: ["Economia", "socialismo libertário", "autogestão económica"],
-      missing: true,
-      missingMessage: "⚠️ EPUB em construção.\n\n(Arquivo ainda em produção / não publicado.)"
+      tags: ["Economia", "socialismo libertário", "autogestão económica"]
     }
   ];
 
@@ -1021,9 +1019,6 @@ body.night .btn *{ color: inherit !important; }
   // ✅ (AJOUT) mémorisation du scope catalogue
   const SCOPE_KEY = "catalogScope";
 
-
-  // ✅ Nettoyage: supprimer tout accès restreint qui aurait été persisté par erreur (anciennes versions)
-  try{ localStorage.removeItem(ACCESS_KEY); localStorage.removeItem(ACCESS_HASH_KEY); } catch(e){}
 
   // =======================
   // DOM
@@ -1693,8 +1688,16 @@ window.addEventListener("resize", () => {
     return out;
   }
 
-  function renderTOCIntoDrawer(){
-    const toc = book && book.navigation && Array.isArray(book.navigation.toc) ? book.navigation.toc : [];
+  async function renderTOCIntoDrawer(){
+    let toc = [];
+    try{
+      if (book) {
+        if ((!book.navigation || !Array.isArray(book.navigation.toc)) && book.loaded && book.loaded.navigation) {
+          await book.loaded.navigation;
+        }
+        toc = (book.navigation && Array.isArray(book.navigation.toc)) ? book.navigation.toc : [];
+      }
+    } catch(e){ toc = []; }
     const flat = flattenToc(toc, 0, []);
     if (!flat.length) {
       drawerBody.innerHTML = `<div class="notice">Este EPUB não possui sommaire (TOC).</div>`;
@@ -2047,23 +2050,34 @@ window.addEventListener("resize", () => {
   tapRight && tapRight.addEventListener("click", safeNext);
 
   // ===== PRIVATE ACCESS =====
-  // ✅ Comportamento pedido: o acesso restrito deve EXPIRAR ao fechar o navegador.
-  // Portanto, usamos SOMENTE sessionStorage (nunca localStorage).
+  // Regras:
+  // - Se "lembrar" estiver marcado, o desbloqueio fica persistente (localStorage).
+  // - Caso contrário, o desbloqueio vale só para a sessão do navegador (sessionStorage) e expira ao fechar.
+
   function isUnlocked(){
-    try { return sessionStorage.getItem(ACCESS_KEY) === "1"; }
-    catch(e){ return false; }
+    try { if (sessionStorage.getItem(ACCESS_KEY) === "1") return true; } catch(e){}
+    try { return localStorage.getItem(ACCESS_KEY) === "1"; } catch(e){ return false; }
   }
 
-  function setUnlocked(){
+  function setUnlocked(persist){
+    const useLocal = !!persist;
     try{
-      sessionStorage.setItem(ACCESS_KEY, "1");
-      if (PRIVATE_PASSWORD_HASH_HEX) sessionStorage.setItem(ACCESS_HASH_KEY, PRIVATE_PASSWORD_HASH_HEX);
+      if (useLocal) {
+        localStorage.setItem(ACCESS_KEY, "1");
+        if (PRIVATE_PASSWORD_HASH_HEX) localStorage.setItem(ACCESS_HASH_KEY, PRIVATE_PASSWORD_HASH_HEX);
+        sessionStorage.removeItem(ACCESS_KEY);
+        sessionStorage.removeItem(ACCESS_HASH_KEY);
+      } else {
+        sessionStorage.setItem(ACCESS_KEY, "1");
+        if (PRIVATE_PASSWORD_HASH_HEX) sessionStorage.setItem(ACCESS_HASH_KEY, PRIVATE_PASSWORD_HASH_HEX);
+        localStorage.removeItem(ACCESS_KEY);
+        localStorage.removeItem(ACCESS_HASH_KEY);
+      }
     } catch(e){}
   }
 
   function clearUnlocked(){
     try{
-      // limpa também resíduos antigos (caso versões anteriores tenham gravado em localStorage)
       localStorage.removeItem(ACCESS_KEY);
       localStorage.removeItem(ACCESS_HASH_KEY);
       sessionStorage.removeItem(ACCESS_KEY);
@@ -2270,6 +2284,9 @@ window.addEventListener("resize", () => {
   async function openBook(item) {
     clearError();
 
+    // Always clear previous viewer content to avoid "ghost" books on failed loads
+    try { document.getElementById("viewer").innerHTML = ""; } catch(e){}
+
     currentItem = item;
     noteStack = [];
     updateNoteBackUI();
@@ -2413,6 +2430,7 @@ window.addEventListener("resize", () => {
 
     } catch (err) {
       console.error(err);
+      try { document.getElementById("viewer").innerHTML = ""; } catch(e){}
       showError(
         "Falha ao abrir o EPUB.\n" +
         "Detalhe técnico: " + (err && err.message ? err.message : String(err))
