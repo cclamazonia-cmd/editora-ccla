@@ -1009,9 +1009,7 @@ body.night .btn *{ color: inherit !important; }
       author: "Abraham Guillén (1990)",
       file: "economia-autogestionaria.epub",
       cover: "https://cclamazonia.noblogs.org/files/2026/01/Capa-economia-autogestionaria.png",
-      tags: ["Economia", "socialismo libertário", "autogestão económica"],
-      missing: true,
-      missingMessage: "⚠️ EPUB em construção.\n\n(Arquivo ainda em produção / não publicado.)"
+      tags: ["Economia", "socialismo libertário", "autogestão económica"]
     }
   ];
 
@@ -2339,9 +2337,11 @@ table, thead, tbody, tr, td, th { background: transparent !important; }
   }
 
   function getAllBooks(){
-    const unlocked = isUnlocked();
-    return unlocked ? BOOKS_PUBLIC.concat(BOOKS_PRIVATE) : BOOKS_PUBLIC.slice();
-  }
+  const unlocked = isUnlocked();
+  // IMPORTANT: Tant que la senha n’est pas validée, on ne renvoie JAMAIS les livres privés
+  // (donc ils n’apparaissent pas, même via recherche/tri/restauration).
+  return unlocked ? BOOKS_PUBLIC.concat(BOOKS_PRIVATE) : BOOKS_PUBLIC.slice();
+}
 
   function filterAndSort(list){
     const q = normalize(searchInput ? searchInput.value : "");
@@ -2372,6 +2372,18 @@ table, thead, tbody, tr, td, th { background: transparent !important; }
   function renderCatalog(){
     const unlocked = isUnlocked();
     let scope = (scopeSelect && scopeSelect.value) || "public";
+
+// HARD GUARD: se está bloqueado, nada do catálogo restrito pode aparecer
+if (!unlocked) {
+  if (privateArea) privateArea.style.display = "none";
+  if (elPrivateHeading) elPrivateHeading.style.display = "none";
+  if (elBooksPrivate) { elBooksPrivate.style.display = "none"; elBooksPrivate.innerHTML = ""; }
+  // Impor escopo público (mesmo se alguém mexer no DOM)
+  scope = "public";
+  if (scopeSelect) scopeSelect.value = "public";
+  try { localStorage.setItem(SCOPE_KEY, "public"); } catch(e){}
+}
+
 
     // ✅ si pas unlocked, "private/all" interdit → public
     if (!unlocked && (scope === "private" || scope === "all")) scope = "public";
