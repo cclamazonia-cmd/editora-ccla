@@ -578,6 +578,60 @@ p{margin:0 0 12px 0;color:var(--muted);line-height:1.55}
 .tapzone.right{right:0}
 /* Keep page-turn tap zones fully invisible (no pressed/active overlay) */
 .tapzone:active{background:transparent}
+/* ===== Page-flip illusion (spread/2-page mode only) =====
+   Note: purely cosmetic. JS adds .flip-next / .flip-prev on #viewerShell.
+*/
+#viewerShell{
+  perspective: 1400px;
+  transform-style: preserve-3d;
+}
+#viewer{
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+#viewerShell.flip-next #viewer{
+  animation: cclaFlipNext 260ms ease;
+}
+#viewerShell.flip-prev #viewer{
+  animation: cclaFlipPrev 260ms ease;
+}
+@keyframes cclaFlipNext{
+  0%   { transform: rotateY(0deg); }
+  35%  { transform: rotateY(-11deg); }
+  100% { transform: rotateY(0deg); }
+}
+@keyframes cclaFlipPrev{
+  0%   { transform: rotateY(0deg); }
+  35%  { transform: rotateY(11deg); }
+  100% { transform: rotateY(0deg); }
+}
+
+/* Shadow veil to sell the flip */
+#viewerShell::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  opacity:0;
+}
+#viewerShell.flip-next::after{
+  animation: cclaFlipShadowNext 260ms ease;
+  background: linear-gradient(to left, rgba(0,0,0,.18), rgba(0,0,0,0));
+}
+#viewerShell.flip-prev::after{
+  animation: cclaFlipShadowPrev 260ms ease;
+  background: linear-gradient(to right, rgba(0,0,0,.18), rgba(0,0,0,0));
+}
+@keyframes cclaFlipShadowNext{
+  0%{opacity:0}
+  35%{opacity:1}
+  100%{opacity:0}
+}
+@keyframes cclaFlipShadowPrev{
+  0%{opacity:0}
+  35%{opacity:1}
+  100%{opacity:0}
+}
 
 /* Fullscreen */
 .fullscreen-exit{
@@ -2045,12 +2099,42 @@ window.addEventListener("resize", () => {
     return await goToSpineIndex(idx - 1);
   }
 
+
+// ===== Page-flip illusion (spread/2-page mode only) =====
+// Purely cosmetic: toggles CSS classes on #viewerShell before calling rendition.next()/prev().
+let _flipT = null;
+function spreadIsActiveForFlip(){
+  try{
+    return !!rendition && !!viewerShell
+      && spreadOnDesktop
+      && isDesktopForSpread()
+      && desiredSpread() !== "none";
+  } catch(e){ return false; }
+}
+function startFlip(dir){
+  try{
+    if (!viewerShell) return;
+    viewerShell.classList.remove("flip-next","flip-prev");
+    viewerShell.classList.add(dir === "next" ? "flip-next" : "flip-prev");
+    clearTimeout(_flipT);
+    _flipT = setTimeout(() => {
+      try{ viewerShell.classList.remove("flip-next","flip-prev"); } catch(e){}
+    }, 300);
+  } catch(e){}
+}
+async function navWithFlip(dir, navFn){
+  if (!spreadIsActiveForFlip()) return await navFn();
+  startFlip(dir);
+  // Let the browser paint the class before navigation updates the iframes
+  await new Promise(r => setTimeout(r, 40));
+  return await navFn();
+}
   async function safePrev(){
     if (!rendition) return;
     if (hasSelection()) return;
 
     const before = locSig(getSafeLocation());
-    try { await rendition.prev(); } catch(e){}
+    try { await navWithFlip("prev", () => rendition.prev()); } catch(e){}
 
     // If we didn't move (often happens at the very start of a spine item), try previous chapter
     setTimeout(async () => {
@@ -2066,7 +2150,7 @@ window.addEventListener("resize", () => {
     if (hasSelection()) return;
 
     const before = locSig(getSafeLocation());
-    try { await rendition.next(); } catch(e){}
+    try { await navWithFlip("next", () => rendition.next()); } catch(e){}
 
     // If we didn't move (often happens at end of a spine item), try next chapter
     setTimeout(async () => {
