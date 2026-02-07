@@ -874,6 +874,43 @@ body.night .tagline{ color: var(--muted) !important; }
 
 body.night .fullscreen-exit{ color: var(--fg) !important; }
 body.night .btn *{ color: inherit !important; }
+
+/* ===== Note popup (Calibre-like) ===== */
+.note-modal{ position:fixed; inset:0; display:none; z-index:9999; }
+.note-modal.is-open{ display:block; }
+.note-modal__backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.35); }
+.note-modal__panel{
+  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:min(720px, calc(100vw - 24px));
+  max-height:min(70vh, 640px);
+  overflow:auto;
+  background:var(--bg);
+  color:var(--fg);
+  border:1px solid var(--border);
+  border-radius:16px;
+  box-shadow:0 18px 60px rgba(0,0,0,.25);
+  padding:14px 14px 18px;
+}
+.note-modal__close{
+  position:sticky; top:0;
+  float:right;
+  border:1px solid var(--border);
+  background:transparent;
+  color:var(--fg);
+  border-radius:10px;
+  padding:2px 10px;
+  font-size:20px;
+  line-height:1;
+  cursor:pointer;
+}
+.note-modal__content{
+  font-family:var(--font-reading);
+  font-size:1rem;
+  line-height:1.55;
+  color:var(--fg);
+}
+.note-modal__content a{ word-break:break-word; }
+.note-modal__content p{ color:inherit; }
 </style>
 </head>
 
@@ -1028,6 +1065,14 @@ body.night .btn *{ color: inherit !important; }
   <div class="drawer-body" id="drawerBody"></div>
 </aside>
 
+<div id="noteModal" class="note-modal" aria-hidden="true">
+  <div class="note-modal__backdrop" data-close="1"></div>
+  <div class="note-modal__panel" role="dialog" aria-modal="true" aria-label="Nota">
+    <button type="button" class="note-modal__close" id="noteModalClose" title="Fechar" aria-label="Fechar">×</button>
+    <div class="note-modal__content" id="noteModalContent"></div>
+  </div>
+</div>
+
 <script src="jszip.min.js"></script>
 <script src="epub.min.js"></script>
 <script>
@@ -1144,6 +1189,12 @@ body.night .btn *{ color: inherit !important; }
   const drawerBody = document.getElementById("drawerBody");
   const drawerCloseBtn = document.getElementById("drawerCloseBtn");
 
+
+  // Note popup (Calibre-like)
+  const noteModal = document.getElementById("noteModal");
+  const noteModalContent = document.getElementById("noteModalContent");
+  const noteModalClose = document.getElementById("noteModalClose");
+
   // =======================
   // STATE
   // =======================
@@ -1245,6 +1296,108 @@ function syncSpreadButton(){
       pwInput.type = showPwChk.checked ? "text" : "password";
     } catch(e){}
   }
+
+
+  // ===== Note popup helpers =====
+  function openNoteModal(html){
+    try{
+      if (!noteModal || !noteModalContent) return;
+      noteModalContent.innerHTML = html || "<p>(nota vazia)</p>";
+      noteModal.classList.add("is-open");
+      noteModal.setAttribute("aria-hidden","false");
+    } catch(e){}
+  }
+  function closeNoteModal(){
+    try{
+      if (!noteModal || !noteModalContent) return;
+      noteModal.classList.remove("is-open");
+      noteModal.setAttribute("aria-hidden","true");
+      noteModalContent.innerHTML = "";
+    } catch(e){}
+  }
+  if (noteModalClose) noteModalClose.addEventListener("click", closeNoteModal);
+  if (noteModal) noteModal.addEventListener("click", (e) => {
+    const t = e.target;
+    if (t && t.dataset && t.dataset.close === "1") closeNoteModal();
+  });
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && noteModal && noteModal.classList.contains("is-open")) closeNoteModal();
+  });
+
+  function isNoteRefLink(a){
+    if (!a) return false;
+    const href = a.getAttribute("href") || "";
+    if (!href || href.startsWith("javascript:")) return false;
+
+    const epubType = (a.getAttribute("epub:type") || "").toLowerCase();
+    const role = (a.getAttribute("role") || "").toLowerCase();
+    const cls = (a.className || "").toLowerCase();
+
+    if (epubType === "noteref" || role === "doc-noteref" || cls.includes("noteref")) return true;
+
+    if (href.includes("#")) {
+      const id = href.split("#")[1] || "";
+      if (/^(fn|footnote|note|nota|notas|endnote)/i.test(id)) return true;
+      if (/notes?/i.test(href)) return true;
+    }
+    return false;
+  }
+
+  async function loadXhtmlText(resolvedHref){
+    // Try epub.js helpers first; fall back gracefully.
+    try{
+      if (book && typeof book.load === "function") return await book.load(resolvedHref);
+    } catch(e){}
+    try{
+      if (book && book.archive && typeof book.archive.request === "function") {
+        return await book.archive.request(resolvedHref);
+      }
+    } catch(e){}
+    // Last resort: fetch (may fail depending on how the book is loaded)
+    try{
+      const r = await fetch(resolvedHref);
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return await r.text();
+    } catch(e){
+      return null;
+    }
+  }
+
+  async function resolveNoteHTMLFromLink(a, contentDoc){
+    try{
+      const href = a.getAttribute("href") || "";
+      const parts = href.split("#");
+      const filePart = parts[0] || "";
+      const targetId = parts[1] ? decodeURIComponent(parts[1]) : "";
+
+      // Same document anchor
+      if (!filePart || filePart === "" || href.startsWith("#")) {
+        if (!targetId) return "<p>(nota inválida)</p>";
+        const el = contentDoc.getElementById(targetId);
+        if (!el) return "<p>(nota não encontrada)</p>";
+        return el.outerHTML;
+      }
+
+      // Other document
+      const resolved = (book && book.path && typeof book.path.resolve === "function")
+        ? book.path.resolve(filePart)
+        : filePart;
+
+      const txt = await loadXhtmlText(resolved);
+      if (!txt) return "<p>(erro ao carregar nota)</p>";
+
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(txt, "application/xhtml+xml");
+      if (!targetId) return (doc.body ? doc.body.innerHTML : "<p>(nota vazia)</p>");
+
+      const el = doc.getElementById(targetId);
+      if (!el) return "<p>(nota não encontrada)</p>";
+      return el.outerHTML;
+    } catch(e){
+      return "<p>(erro ao carregar nota)</p>";
+    }
+  }
+
 
   function showError(message) {
     elError.style.display = "block";
@@ -1596,53 +1749,24 @@ function upsertHardStyle(contents){
               } catch(e){}
             }, {passive:true});
 
-            // Footnotes: remember where we are and allow return
-            doc.addEventListener("click", (ev) => {
+            // Footnotes: open notes in an in-reader popup (Calibre-like)
+            doc.addEventListener("click", async (ev) => {
               try{
                 const a = ev.target && ev.target.closest ? ev.target.closest("a") : null;
                 if (!a) return;
+                if (!isNoteRefLink(a)) return;
 
-                const href = a.getAttribute("href") || "";
-                const epubType = (a.getAttribute("epub:type") || "").toLowerCase();
-                const role = (a.getAttribute("role") || "").toLowerCase();
+                ev.preventDefault();
+                ev.stopPropagation();
 
-                const isNoteRef =
-                  epubType === "noteref" ||
-                  role === "doc-noteref" ||
-                  a.classList.contains("noteref") ||
-                  /#(fn|footnote|note|nota|notas|ref)/i.test(href);
+                const html = await resolveNoteHTMLFromLink(a, doc);
 
-                const isBackLink =
-                  epubType === "backlink" ||
-                  role === "doc-backlink" ||
-                  a.classList.contains("backlink") ||
-                  /#(back|return|retour)/i.test(href);
-
-                if (isNoteRef && href) {
-                  ev.preventDefault();
-                  const loc = getSafeLocation();
-                  const cfi = loc && loc.start && loc.start.cfi ? loc.start.cfi : null;
-                  if (cfi) {
-                    noteStack.push(cfi);
-                    if (noteStack.length > 25) noteStack.shift();
-                    updateNoteBackUI();
-                  }
-                  rendition.display(href).then(() => {
-                    applyThemeToRendition();
-                    applyFlowPaginated(true);
-                  }).catch(() => {});
-                } else if (isBackLink && noteStackCanPop()) {
-                  ev.preventDefault();
-                  const cfi = noteStack.pop();
-                  updateNoteBackUI();
-                  rendition.display(cfi).then(() => {
-                    applyThemeToRendition();
-                    applyFlowPaginated(true);
-                  }).catch(() => {});
-                }
+                // Optional: remove common back-links (↩ etc.) to keep the popup clean
+                // (kept conservative: we don't strip anything by default)
+                openNoteModal(html);
               } catch(e){}
-            });
-          } catch(e){}
+            }, true);
+} catch(e){}
         });
       } catch(e){}
     }
