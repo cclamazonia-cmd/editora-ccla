@@ -573,11 +573,16 @@ p{margin:0 0 12px 0;color:var(--muted);line-height:1.55}
   width:28%;
   z-index:4;
   background:transparent;
+  pointer-events:none;
 }
 .tapzone.left{left:0}
 .tapzone.right{right:0}
 /* Keep page-turn tap zones fully invisible (no pressed/active overlay) */
 .tapzone:active{background:transparent}
+@media (pointer: coarse){
+  .tapzone{pointer-events:auto;}
+}
+
 /* ===== Page-flip illusion (spread/2-page mode only) =====
    Note: purely cosmetic. JS adds .flip-next / .flip-prev on #viewerShell.
 */
@@ -1363,40 +1368,79 @@ function syncSpreadButton(){
     }
   }
 
-  async function resolveNoteHTMLFromLink(a, contentDoc){
+  async function resolveNoteHTMLFromLink(a, contentDoc, baseHref){
     try{
       const href = a.getAttribute("href") || "";
       const parts = href.split("#");
-      const filePart = parts[0] || "";
+      const filePartRaw = parts[0] || "";
       const targetId = parts[1] ? decodeURIComponent(parts[1]) : "";
 
       // Same document anchor
-      if (!filePart || filePart === "" || href.startsWith("#")) {
+      if (!filePartRaw || href.startsWith("#")) {
         if (!targetId) return "<p>(nota inválida)</p>";
         const el = contentDoc.getElementById(targetId);
         if (!el) return "<p>(nota não encontrada)</p>";
         return el.outerHTML;
       }
 
-      // Other document
-      const resolved = (book && book.path && typeof book.path.resolve === "function")
-        ? book.path.resolve(filePart)
-        : filePart;
+      // Normalize relative href against current section href (POSIX style)
+      let filePart = filePartRaw;
+      try{
+        if (baseHref){
+          const baseDir = baseHref.includes("/") ? baseHref.slice(0, baseHref.lastIndexOf("/") + 1) : "";
+          // Basic POSIX normalization
+          const norm = (p) => {
+            const out = [];
+            for (const seg of p.split("/")){
+              if (!seg || seg === ".") continue;
+              if (seg === "..") { out.pop(); continue; }
+              out.push(seg);
+            }
+            return out.join("/");
+          };
+          filePart = norm(baseDir + filePartRaw);
+        }
+      } catch(e){ filePart = filePartRaw; }
 
-      const txt = await loadXhtmlText(resolved);
+      // Build candidate hrefs to try (epub.js can be picky depending on loader)
+      const candidates = [];
+      const pushCand = (x) => { if (x && !candidates.includes(x)) candidates.push(x); };
+      pushCand(filePart);
+      pushCand(decodeURI(filePart));
+      pushCand(filePart.replace(/^\/+/, ""));
+      try{
+        if (book && typeof book.resolve === "function") pushCand(book.resolve(filePart));
+      } catch(e){}
+      try{
+        if (book && book.path && typeof book.path.resolve === "function") pushCand(book.path.resolve(filePart));
+      } catch(e){}
+
+      let txt = null;
+      for (const c of candidates){
+        txt = await loadXhtmlText(c);
+        if (txt) break;
+      }
       if (!txt) return "<p>(erro ao carregar nota)</p>";
 
+      // Parse XHTML; fall back to HTML if the XHTML is not well-formed
       const parser = new DOMParser();
-      const doc = parser.parseFromString(txt, "application/xhtml+xml");
+      let doc = parser.parseFromString(txt, "application/xhtml+xml");
+      const isParserError = doc && doc.getElementsByTagName("parsererror").length > 0;
+      if (isParserError) doc = parser.parseFromString(txt, "text/html");
+
       if (!targetId) return (doc.body ? doc.body.innerHTML : "<p>(nota vazia)</p>");
 
-      const el = doc.getElementById(targetId);
+      // Try id first, then common variants (some generators prefix footnotes)
+      let el = doc.getElementById(targetId);
+      if (!el && targetId.startsWith("#")) el = doc.getElementById(targetId.slice(1));
+      if (!el && /^fn/i.test(targetId)) el = doc.getElementById(targetId.replace(/^fn/i, "footnote"));
       if (!el) return "<p>(nota não encontrada)</p>";
       return el.outerHTML;
     } catch(e){
       return "<p>(erro ao carregar nota)</p>";
     }
   }
+
 
 
   function showError(message) {
@@ -1730,6 +1774,8 @@ function upsertHardStyle(contents){
             const doc = contents.document;
             if (!doc || !doc.body) return;
 
+            const baseHref = (contents && contents.section && contents.section.href) ? contents.section.href : (contents && contents.href ? contents.href : "");
+
             // Click-to-turn pages inside the book (does not affect links / selection)
             doc.addEventListener("click", (ev) => {
               try{
@@ -1759,7 +1805,7 @@ function upsertHardStyle(contents){
                 ev.preventDefault();
                 ev.stopPropagation();
 
-                const html = await resolveNoteHTMLFromLink(a, doc);
+                const html = await resolveNoteHTMLFromLink(a, doc, baseHref);
 
                 // Optional: remove common back-links (↩ etc.) to keep the popup clean
                 // (kept conservative: we don't strip anything by default)
