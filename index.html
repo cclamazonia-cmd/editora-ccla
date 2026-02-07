@@ -1348,24 +1348,77 @@ function syncSpreadButton(){
     return false;
   }
 
-  async function loadXhtmlText(resolvedHref){
-    // Try epub.js helpers first; fall back gracefully.
-    try{
-      if (book && typeof book.load === "function") return await book.load(resolvedHref);
-    } catch(e){}
-    try{
-      if (book && book.archive && typeof book.archive.request === "function") {
-        return await book.archive.request(resolvedHref);
+  function extractNoteHTML(el){
+      try{
+        if (!el) return "<p>(nota não encontrada)</p>";
+        // Prefer a semantic container if the id is on a child (dt/dd/span)
+        let container = el;
+        try{
+          const c = el.closest && el.closest('aside[epub\\:type~="footnote"], aside[epub\\:type~="endnote"], aside[epub\\:type*="note"], li.footnote, li.endnote, div.footnote, div.endnote, dl.footnote, section[epub\\:type~="endnotes"] dl, section[epub\\:type~="footnotes"] li');
+          if (c) container = c;
+        } catch(e){}
+        let html = container.outerHTML || "";
+        // Remove obvious back-links like "←1" if present (keep the note text)
+        try{
+          html = html.replace(/<a[^>]*>(?:\s*←\s*\d+|\s*↩\s*|\s*retour\s*|\s*voltar\s*)<\/a>/gi, "");
+        } catch(e){}
+        return html || "<p>(nota vazia)</p>";
+      } catch(e){
+        return "<p>(nota não encontrada)</p>";
       }
-    } catch(e){}
-    // Last resort: fetch (may fail depending on how the book is loaded)
-    try{
-      const r = await fetch(resolvedHref);
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return await r.text();
-    } catch(e){
+  }
+
+    async function loadXhtmlText(resolvedHref){
+      // Return XHTML/HTML as TEXT, regardless of what epub.js returns (string / Document / ArrayBuffer).
+      try{
+        if (book && typeof book.load === "function") {
+          const res = await book.load(resolvedHref);
+          if (!res) return null;
+          if (typeof res === "string") return res;
+          // ArrayBuffer / TypedArray
+          try{
+            if (res instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(res));
+            if (ArrayBuffer.isView(res)) return new TextDecoder("utf-8").decode(res);
+          } catch(e){}
+          // XML/HTML Document
+          try{
+            if (res && res.documentElement) return new XMLSerializer().serializeToString(res);
+          } catch(e){}
+          // Some loaders return a Response-like object
+          try{
+            if (res && typeof res.text === "function") return await res.text();
+          } catch(e){}
+          // Last fallback: coerce
+          return String(res);
+        }
+      } catch(e){}
+
+      try{
+        if (book && book.archive && typeof book.archive.request === "function") {
+          const res = await book.archive.request(resolvedHref);
+          if (!res) return null;
+          if (typeof res === "string") return res;
+          try{
+            if (res instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(res));
+            if (ArrayBuffer.isView(res)) return new TextDecoder("utf-8").decode(res);
+          } catch(e){}
+          try{
+            if (res && res.documentElement) return new XMLSerializer().serializeToString(res);
+          } catch(e){}
+          try{
+            if (res && typeof res.text === "function") return await res.text();
+          } catch(e){}
+          return String(res);
+        }
+      } catch(e){}
+
+      // Last resort: fetch (may fail depending on how the book is loaded)
+      try{
+        const r = await fetch(resolvedHref);
+        if (!r.ok) return null;
+        return await r.text();
+      } catch(e){}
       return null;
-    }
   }
 
   async function resolveNoteHTMLFromLink(a, contentDoc, baseHref){
@@ -1380,7 +1433,7 @@ function syncSpreadButton(){
         if (!targetId) return "<p>(nota inválida)</p>";
         const el = contentDoc.getElementById(targetId);
         if (!el) return "<p>(nota não encontrada)</p>";
-        return el.outerHTML;
+        return extractNoteHTML(el);
       }
 
       // Normalize relative href against current section href (POSIX style)
@@ -1435,7 +1488,7 @@ function syncSpreadButton(){
       if (!el && targetId.startsWith("#")) el = doc.getElementById(targetId.slice(1));
       if (!el && /^fn/i.test(targetId)) el = doc.getElementById(targetId.replace(/^fn/i, "footnote"));
       if (!el) return "<p>(nota não encontrada)</p>";
-      return el.outerHTML;
+      return extractNoteHTML(el);
     } catch(e){
       return "<p>(erro ao carregar nota)</p>";
     }
