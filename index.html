@@ -1184,6 +1184,18 @@ function syncSpreadButton(){
       if (showPwChk) showPwChk.checked = false;
     } catch(e){}
   }
+function autoLockIfNotRemembered(){
+    try{
+      // Se "lembrar" estiver ativo (persistente), não faz nada
+      const persistent = localStorage.getItem(ACCESS_KEY) === "1";
+      if (persistent) return;
+
+      // Caso contrário, força o bloqueio da sessão (restrito)
+      sessionStorage.removeItem(ACCESS_KEY);
+      sessionStorage.removeItem(ACCESS_HASH_KEY);
+    } catch(e){}
+  }
+
   function applyPasswordVisibilityFromUI(){
     try{
       if (!pwInput || !showPwChk) return;
@@ -1333,6 +1345,9 @@ function syncSpreadButton(){
 
   window.addEventListener("pagehide", resetPasswordVisibility);
   window.addEventListener("beforeunload", resetPasswordVisibility);
+  window.addEventListener("pagehide", autoLockIfNotRemembered);
+  window.addEventListener("beforeunload", autoLockIfNotRemembered);
+
 
   function applyReadingPrefs() {
     if (!rendition) return;
