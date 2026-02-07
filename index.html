@@ -570,18 +570,14 @@ p{margin:0 0 12px 0;color:var(--muted);line-height:1.55}
   position:absolute;
   top:0;
   bottom:0;
-  width:28%;
-  z-index:4;
+  width:56px; /* default; JS ajusta para as margens reais */
+  z-index:6;
   background:transparent;
-  pointer-events:none;
+  pointer-events:auto;
 }
 .tapzone.left{left:0}
 .tapzone.right{right:0}
-/* Keep page-turn tap zones fully invisible (no pressed/active overlay) */
 .tapzone:active{background:transparent}
-@media (pointer: coarse){
-  .tapzone{pointer-events:auto;}
-}
 
 /* ===== Page-flip illusion (spread/2-page mode only) =====
    Note: purely cosmetic. JS adds .flip-next / .flip-prev on #viewerShell.
@@ -908,6 +904,12 @@ body.night .btn *{ color: inherit !important; }
   line-height:1;
   cursor:pointer;
 }
+.note-modal__title{
+  font-family:var(--font-ui);
+  font-weight:700;
+  margin:6px 0 10px;
+  padding-right:36px;
+}
 .note-modal__content{
   font-family:var(--font-reading);
   font-size:1rem;
@@ -1074,6 +1076,7 @@ body.night .btn *{ color: inherit !important; }
   <div class="note-modal__backdrop" data-close="1"></div>
   <div class="note-modal__panel" role="dialog" aria-modal="true" aria-label="Nota">
     <button type="button" class="note-modal__close" id="noteModalClose" title="Fechar" aria-label="Fechar">×</button>
+    <div class="note-modal__title" id="noteModalTitle"></div>
     <div class="note-modal__content" id="noteModalContent"></div>
   </div>
 </div>
@@ -1166,6 +1169,37 @@ body.night .btn *{ color: inherit !important; }
   const tapLeft = document.getElementById("tapLeft");
   const tapRight = document.getElementById("tapRight");
 
+  function positionTapzones(){
+    try{
+      if (!tapLeft || !tapRight) return;
+      const shell = document.getElementById("viewerShell") || document.getElementById("viewer") || tapLeft.parentElement;
+      if (!shell) return;
+      const iframe = shell.querySelector("iframe");
+      const shellRect = shell.getBoundingClientRect();
+      if (!iframe){
+        tapLeft.style.width = "56px";
+        tapRight.style.width = "56px";
+        return;
+      }
+      const iframeRect = iframe.getBoundingClientRect();
+      const leftGutter = Math.max(0, Math.floor(iframeRect.left - shellRect.left));
+      const rightGutter = Math.max(0, Math.floor(shellRect.right - iframeRect.right));
+
+      // Only in the margins (outside text area)
+      tapLeft.style.left = "0px";
+      tapLeft.style.width = leftGutter + "px";
+      tapRight.style.right = "0px";
+      tapRight.style.width = rightGutter + "px";
+
+      // If gutters are basically zero (mobile/full-bleed), keep a small usable zone
+      if (leftGutter < 8) tapLeft.style.width = "56px";
+      if (rightGutter < 8) tapRight.style.width = "56px";
+    } catch(e){}
+  }
+
+  window.addEventListener("resize", () => requestAnimationFrame(positionTapzones));
+
+
   const progressWrap = document.getElementById("progressWrap");
   const progressStatus = document.getElementById("progressStatus");
   const progressFill = document.getElementById("progressFill");
@@ -1198,6 +1232,7 @@ body.night .btn *{ color: inherit !important; }
   // Note popup (Calibre-like)
   const noteModal = document.getElementById("noteModal");
   const noteModalContent = document.getElementById("noteModalContent");
+  const noteModalTitle = document.getElementById("noteModalTitle");
   const noteModalClose = document.getElementById("noteModalClose");
 
   // =======================
@@ -1304,9 +1339,13 @@ function syncSpreadButton(){
 
 
   // ===== Note popup helpers =====
-  function openNoteModal(html){
+  function openNoteModal(html, label){
     try{
       if (!noteModal || !noteModalContent) return;
+      if (noteModalTitle){
+        noteModalTitle.textContent = label || "";
+        noteModalTitle.style.display = label ? "block" : "none";
+      }
       noteModalContent.innerHTML = html || "<p>(nota vazia)</p>";
       noteModal.classList.add("is-open");
       noteModal.setAttribute("aria-hidden","false");
@@ -1329,7 +1368,21 @@ function syncSpreadButton(){
     if (e.key === "Escape" && noteModal && noteModal.classList.contains("is-open")) closeNoteModal();
   });
 
-  function isNoteRefLink(a){
+  
+  function getNoteLabelFromHref(a){
+    try{
+      const href = (a && a.getAttribute && a.getAttribute("href")) ? a.getAttribute("href") : "";
+      const t = (a && (a.textContent||"")).replace(/\s+/g,"").trim();
+      if (/^\d+$/.test(t)) return "Nota " + t;
+      if (href && href.includes("#")){
+        const id = decodeURIComponent((href.split("#")[1]||""));
+        const m = id.match(/(\d+)/);
+        if (m) return "Nota " + m[1];
+      }
+    } catch(e){}
+    return "Nota";
+  }
+function isNoteRefLink(a){
     if (!a) return false;
     const href = a.getAttribute("href") || "";
     if (!href || href.startsWith("javascript:")) return false;
@@ -1862,7 +1915,7 @@ function upsertHardStyle(contents){
 
                 // Optional: remove common back-links (↩ etc.) to keep the popup clean
                 // (kept conservative: we don't strip anything by default)
-                openNoteModal(html);
+                openNoteModal(html, getNoteLabelFromHref(a));
               } catch(e){}
             }, true);
 } catch(e){}
