@@ -446,11 +446,16 @@ p{margin:0 0 12px 0;color:var(--muted);line-height:1.55}
 .viewer-center{
   display:flex;
   align-items:center;
-  gap:10px;
+  gap:8px;
   justify-content:center;
   flex:1;
   flex-wrap:wrap;
+  flex-direction:column; /* A+ em cima, A- em baixo */
 }
+
+#fontPlus{ order:0; }
+#progress{ order:1; }
+#fontMinus{ order:2; }
 
 .viewer-toolbar .btn{
   border: 1px solid var(--ui-btn-border);
@@ -828,6 +833,9 @@ body.reader-open .footer{display:none}
   .viewer-left::-webkit-scrollbar,
   .viewer-center::-webkit-scrollbar,
   .viewer-right::-webkit-scrollbar{ display:none; }
+
+  /* Font buttons: keep horizontal on mobile */
+  .viewer-center{ flex-direction:row; }
 
   .viewer-hint{
     min-width:0;
